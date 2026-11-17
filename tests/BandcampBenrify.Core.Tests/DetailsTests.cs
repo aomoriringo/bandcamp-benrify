@@ -94,7 +94,7 @@ public class DetailsTests
         var page = BandcampParser.ParseTralbum(AlbumHtml(45), AlbumUrl, Now);
         Assert.NotNull(page.Price);
         Assert.Equal(10m, page.Price!.Amount);
-        Assert.Equal("$10+", page.Price.Display);
+        Assert.Equal("$10", page.Price.Display);
         Assert.Equal(2189607369L, page.Tracks[0].AlbumId);
         Assert.Equal(AlbumUrl, page.Tracks[0].AlbumUrl);
     }
@@ -104,7 +104,7 @@ public class DetailsTests
     {
         var page = BandcampParser.ParseTralbum(TrackHtml(2), SnowUrl, Now);
         Assert.Equal(ItemType.Track, page.Type);
-        Assert.Equal("€1+", page.Price!.Display);
+        Assert.Equal("€1", page.Price!.Display);
         Assert.Equal(2189607369L, page.AlbumId);
         Assert.Equal(AlbumUrl, page.AlbumUrl);
         Assert.Equal(AlbumUrl, page.Tracks[0].AlbumUrl);
@@ -119,10 +119,10 @@ public class DetailsTests
     }
 
     [Theory]
-    [InlineData(10, "USD", true, "$10+")]
+    [InlineData(10, "USD", true, "$10")]
     [InlineData(1.5, "GBP", false, "£1.50")]
-    [InlineData(1000, "JPY", true, "¥1000+")]
-    [InlineData(7, "SEK", true, "7 SEK+")]
+    [InlineData(1000, "JPY", true, "¥1000")]
+    [InlineData(7, "SEK", true, "7 SEK")]
     [InlineData(0, "USD", true, "自由価格")]
     [InlineData(0, "USD", false, "無料")]
     public void FormatsPrices(double amount, string currency, bool orMore, string expected)
@@ -149,8 +149,8 @@ public class DetailsTests
         Assert.Equal("47", full.TotalDisplay);
         Assert.True(full.IsComplete);
         Assert.Empty(full.MissingPages(queued));
-        Assert.Equal("$10+", full.AlbumPrice!.Display);
-        Assert.Equal("€1+", full.TrackPrice!.Display);
+        Assert.Equal("$10", full.AlbumPrice!.Display);
+        Assert.Equal("€1", full.TrackPrice!.Display);
     }
 
     [Fact]

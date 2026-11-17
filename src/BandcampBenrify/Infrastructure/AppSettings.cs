@@ -16,7 +16,11 @@ public static class AppPaths
     public static string QueueFile => Path.Combine(DataDir, "queue.json");
 }
 
-public sealed record WindowBounds(double Left, double Top, double Width, double Height, bool Maximized);
+/// <param name="Version">初期サイズの決め方を変えたら上げる (古い版で保存された大きさは使わない)。</param>
+public sealed record WindowBounds(double Left, double Top, double Width, double Height, bool Maximized, int Version = 0)
+{
+    public const int CurrentVersion = 2;
+}
 
 public sealed class AppSettings
 {
@@ -37,6 +41,8 @@ public sealed class AppSettings
     public double Volume { get; set; } = 0.7;
 
     public bool Shuffle { get; set; } = true;
+
+    public bool RepeatOne { get; set; }
 
     /// <summary>購入済みマーク用の Bandcamp ユーザー名 (bandcamp.com/○○)。</summary>
     public string BandcampUsername { get; set; } = "";

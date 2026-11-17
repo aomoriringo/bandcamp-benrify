@@ -12,7 +12,10 @@ namespace BandcampBenrify;
 public partial class MainWindow : Window
 {
     // 数値の列は最初のクリックで「多い順 / 新しい順」にする
-    private static readonly HashSet<string> DescendingFirst = ["TotalSort", "AlbumSupSort", "TrackSupSort", "ReleaseDate"];
+    private static readonly HashSet<string> DescendingFirst = ["TotalSort", "AlbumSupSort", "TrackSupSort", "SupSort", "ReleaseDate", "TrackCount"];
+
+    /// <summary>初回 (保存された位置が無いとき) のウィンドウの大きさ: 作業領域に対する割合。</summary>
+    private const double InitialSizeRatio = 0.7;
 
     public MainWindow()
     {
@@ -37,18 +40,18 @@ public partial class MainWindow : Window
             if (Vm is { } vm)
             {
                 var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
-                vm.Settings.Window = new WindowBounds(r.Left, r.Top, r.Width, r.Height, WindowState == WindowState.Maximized);
+                vm.Settings.Window = new WindowBounds(r.Left, r.Top, r.Width, r.Height, WindowState == WindowState.Maximized, WindowBounds.CurrentVersion);
             }
         };
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
 
-    /// <summary>前回の位置とサイズ。初回は画面 (作業領域) の 9 割の大きさで中央に置く。</summary>
+    /// <summary>前回の位置とサイズ。初回は画面 (作業領域) の 7 割の大きさで中央に置く。</summary>
     private void ApplySavedBounds(WindowBounds? saved)
     {
         var area = SystemParameters.WorkArea;
-        if (saved is not null && saved.Width >= MinWidth && saved.Height >= MinHeight
+        if (saved is not null && saved.Version == WindowBounds.CurrentVersion && saved.Width >= MinWidth && saved.Height >= MinHeight
             && saved.Left < area.Right - 100 && saved.Top < area.Bottom - 100 && saved.Left + saved.Width > area.Left + 100 && saved.Top >= area.Top - 20)
         {
             Left = saved.Left;
@@ -63,26 +66,46 @@ public partial class MainWindow : Window
             return;
         }
 
-        Width = Math.Max(MinWidth, area.Width * 0.9);
-        Height = Math.Max(MinHeight, area.Height * 0.9);
+        Width = Math.Max(MinWidth, area.Width * InitialSizeRatio);
+        Height = Math.Max(MinHeight, area.Height * InitialSizeRatio);
         Left = area.Left + (area.Width - Width) / 2;
         Top = area.Top + (area.Height - Height) / 2;
     }
 
-    private void QueueGrid_Sorting(object sender, DataGridSortingEventArgs e)
+    private void Grid_Sorting(object sender, DataGridSortingEventArgs e)
     {
-        if (e.Column.SortDirection is null && DescendingFirst.Contains(e.Column.SortMemberPath))
+        if (sender is DataGrid grid && e.Column.SortDirection is null && DescendingFirst.Contains(e.Column.SortMemberPath))
         {
             e.Handled = true;
-            var view = QueueGrid.Items;
+            var view = grid.Items;
             view.SortDescriptions.Clear();
             view.SortDescriptions.Add(new SortDescription(e.Column.SortMemberPath, ListSortDirection.Descending));
-            foreach (var c in QueueGrid.Columns)
+            foreach (var c in grid.Columns)
             {
                 c.SortDirection = null;
             }
 
             e.Column.SortDirection = ListSortDirection.Descending;
+        }
+    }
+
+    /// <summary>作品一覧: アーティスト / レーベルの行をダブルクリックしたらその作品一覧を開く。</summary>
+    private void ReleaseGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject)?.DataContext is BrowseItemViewModel { Kind: Core.SearchKind.Band } item
+            && Vm is { } vm)
+        {
+            vm.InputUrl = item.Url;
+            vm.Browse.OpenItemCommand.Execute(item);
+        }
+    }
+
+    /// <summary>曲目: ダブルクリックで試聴 (キューには入れない)。</summary>
+    private void TrackGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject)?.DataContext is QueueItemViewModel item && Vm is { } vm)
+        {
+            vm.Browse.PreviewCommand.Execute(item);
         }
     }
 

@@ -72,6 +72,13 @@ public sealed class AudioPlayer : IDisposable
         set => _player.Volume = Math.Clamp(value, 0, 1);
     }
 
+    /// <summary>1 曲リピート (曲の最後まで行ったら頭から再生し、Ended は発生しない)。</summary>
+    public bool IsLooping
+    {
+        get => _player.IsLoopingEnabled;
+        set => _player.IsLoopingEnabled = value;
+    }
+
     public TimeSpan Position
     {
         get => _player.PlaybackSession.Position;

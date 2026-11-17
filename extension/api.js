@@ -11,11 +11,14 @@ export async function ping() {
   }
 }
 
-/** URL をアプリのキューに送る */
-export async function send(url) {
+/**
+ * URL をアプリに送る。
+ * @param {"enqueue" | "browse"} action enqueue: そのままキューへ / browse: 「探す」タブで作品一覧を開く
+ */
+export async function send(url, action = "enqueue") {
   let res;
   try {
-    res = await fetch(`${API_BASE}/enqueue`, {
+    res = await fetch(`${API_BASE}/${action}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Benrify": "1" },
       body: JSON.stringify({ url }),

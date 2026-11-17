@@ -15,6 +15,7 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
     ];
 
     private bool _isPlaying;
+    private bool _isQueued;
     private TrackDetails _details = new();
     private PurchaseState _purchase;
 
@@ -38,6 +39,24 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
         get => _isPlaying;
         set => Set(ref _isPlaying, value);
     }
+
+    /// <summary>キューに入っているか (「探す」の曲目で使う)。</summary>
+    public bool IsQueued
+    {
+        get => _isQueued;
+        set
+        {
+            if (Set(ref _isQueued, value))
+            {
+                OnPropertyChanged(nameof(QueuedText));
+            }
+        }
+    }
+
+    public string QueuedText => IsQueued ? "✓" : "";
+
+    /// <summary>試聴できる曲か (「探す」の曲目用。ページから読んだ直後の TrackInfo にだけストリーム URL が入っている)。</summary>
+    public bool IsStreamable => Track.StreamUrl is not null;
 
     public TrackDetails Details => _details;
 

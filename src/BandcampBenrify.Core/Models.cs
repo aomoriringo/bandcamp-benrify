@@ -71,8 +71,7 @@ public sealed record PriceInfo
             }
 
             var number = Amount.ToString(Amount == decimal.Truncate(Amount) ? "0" : "0.00", System.Globalization.CultureInfo.InvariantCulture);
-            var text = Symbols.TryGetValue(Currency, out var sym) ? sym + number : $"{number} {Currency}".Trim();
-            return OrMore ? text + "+" : text;
+            return Symbols.TryGetValue(Currency, out var sym) ? sym + number : $"{number} {Currency}".Trim();
         }
     }
 }
@@ -170,7 +169,19 @@ public sealed record Discography
 
 public sealed class BandcampParseException(string message) : Exception(message);
 
+/// <summary>Bandcamp がアクセス確認 (ボット対策) のページを返した。回避はしない。</summary>
+public sealed class BandcampBlockedException(string message) : HttpRequestException(message);
+
 public sealed record CollectionItem(ItemType Type, long Id);
+
+public enum SearchKind
+{
+    Album,
+    Track,
+    /// <summary>アーティスト / レーベル</summary>
+    Band,
+}
+
 
 /// <summary>ファンページの解析結果。Items は最初の 20 件程度だけで、続きは API で取る。</summary>
 public sealed record FanPage(long FanId, int ItemCount, string? LastToken, IReadOnlyList<CollectionItem> Items);

@@ -211,9 +211,21 @@ public sealed class ThrottledHttpClient : IDisposable
             }
 
             var body = await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+            if (IsBotChallenge(body))
+            {
+                // アクセス確認 (ボット対策) のページ。回避はせず、間隔を広げてここで諦める
+                MinInterval = TimeSpan.FromSeconds(Math.Min(MinInterval.TotalSeconds * 2, 15));
+                StatusChanged?.Invoke($"Bandcamp がアクセス確認を求めています。以後の間隔を {MinInterval.TotalSeconds:0.0} 秒に広げました");
+                throw new BandcampBlockedException("Bandcamp がアクセス確認 (ボット対策) のページを返しました。このページはアプリからは取得できません。ブラウザで開いてください。");
+            }
+
             return new HttpResult(body, response.RequestMessage?.RequestUri ?? request.RequestUri!);
         }
     }
+
+    /// <summary>本来のページではなく、JavaScript によるアクセス確認ページが返ってきたか。</summary>
+    public static bool IsBotChallenge(string body) =>
+        body.Length < 20_000 && body.Contains("/_fs-ch-", StringComparison.Ordinal);
 
     public void Dispose()
     {

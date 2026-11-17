@@ -23,18 +23,24 @@ async function main() {
   }
 
   $("enqueue").textContent = LABELS[kindOf(url)];
-  $("enqueue").disabled = !alive;
-  $("enqueue").addEventListener("click", async () => {
-    $("enqueue").disabled = true;
-    try {
-      await send(url);
-      $("result").textContent = "送信しました。アプリ側で順番に取得します。";
-    } catch (e) {
-      $("result").textContent = e.message;
-    } finally {
-      $("enqueue").disabled = false;
-    }
-  });
+  const actions = {
+    browse: "アプリの「探す」で開きました。曲を選んでキューに追加できます。",
+    enqueue: "送信しました。アプリ側で順番に取得します。",
+  };
+  for (const [action, message] of Object.entries(actions)) {
+    $(action).disabled = !alive;
+    $(action).addEventListener("click", async () => {
+      $(action).disabled = true;
+      try {
+        await send(url, action);
+        $("result").textContent = message;
+      } catch (e) {
+        $("result").textContent = e.message;
+      } finally {
+        $(action).disabled = false;
+      }
+    });
+  }
 }
 
 main();

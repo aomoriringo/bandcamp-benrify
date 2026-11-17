@@ -33,6 +33,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private int _consecutiveFailures;
     private bool _retriedCurrent;
     private int _nextSeq;
+    private int _selectedTab;
+    private bool _fetchingDetails;
+    private bool _loadingCollection;
     private HashSet<long> _ownedAlbums = [];
     private HashSet<long> _ownedTracks = [];
 
@@ -85,14 +88,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         QueueView = view;
 
         _player.Volume = settings.Volume;
+        _player.IsLooping = settings.RepeatOne;
         _order.Shuffle = settings.Shuffle;
         _player.Opened += () =>
         {
             _consecutiveFailures = 0;
             Duration = _player.Duration?.TotalSeconds ?? Current?.Track.DurationSeconds ?? 0;
-            StatusText = $"再生中: {Current?.Artist} - {Current?.Title}";
+            StatusText = $"{(IsPreview ? "試聴中" : "再生中")}: {Current?.Artist} - {Current?.Title}";
         };
-        _player.Ended += () => _ = RunSafeAsync(NextAsync());
+        _player.Ended += () =>
+        {
+            // 試聴 (キューに無い曲) は 1 曲で止める。キューの曲なら次へ
+            if (IsPreview)
+            {
+                StopPlayback();
+            }
+            else
+            {
+                _ = RunSafeAsync(NextAsync());
+            }
+        };
         _player.Failed += msg => _ = RunSafeAsync(OnPlaybackFailedAsync(msg));
         _player.PlayingChanged += playing =>
         {
@@ -110,6 +125,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         AsyncCommand.ErrorHandler = ex => StatusText = "エラー: " + ex.Message;
 
+        Browse = new BrowseViewModel(this, _client);
+
         AddUrlCommand = new AsyncCommand(
             async () =>
             {
@@ -119,8 +136,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                     InputUrl = ""; // 成功したら次の URL を貼りやすいように空にする
                 }
             },
+            () => LooksLikeUrl(InputUrl));
+        OpenInBrowseCommand = new AsyncCommand(
+            () =>
+            {
+                SelectedTab = 0;
+                return Browse.OpenAsync(InputUrl);
+            },
             () => !string.IsNullOrWhiteSpace(InputUrl));
-        PlayPauseCommand = new AsyncCommand(PlayPauseAsync, () => Queue.Count > 0);
+        PlayPauseCommand = new AsyncCommand(PlayPauseAsync, () => Queue.Count > 0 || Current is not null);
         NextCommand = new AsyncCommand(NextAsync, () => Queue.Count > 0);
         PreviousCommand = new AsyncCommand(PreviousAsync, () => Queue.Count > 0);
         PlayItemCommand = new AsyncCommand(p => p is QueueItemViewModel item ? PlayItemAsync(item, userInitiated: true) : Task.CompletedTask);
@@ -132,8 +156,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 RemoveItems(Queue.ToList());
             }
         }, () => Queue.Count > 0);
-        FetchDetailsCommand = new AsyncCommand(p => FetchDetailsAsync(Selected(p)), _ => PendingPageCount > 0);
-        RefreshCollectionCommand = new AsyncCommand(RefreshCollectionAsync, () => HasProfile);
+        FetchDetailsCommand = new AsyncCommand(
+            p => FetchDetailsAsync(Selected(p) is { Count: > 0 } sel ? sel : QueueView.Cast<QueueItemViewModel>().ToList()),
+            _ => PendingPageCount > 0 && !_fetchingDetails);
+        RefreshCollectionCommand = new AsyncCommand(RefreshCollectionAsync, () => HasProfile && !_loadingCollection);
         CancelJobsCommand = new RelayCommand(CancelJobs, () => ActiveJobs > 0);
         OpenInBrowserCommand = new RelayCommand(p => OpenUrl((p as QueueItemViewModel ?? Current)?.Track.TrackUrl));
         OpenAlbumCommand = new RelayCommand(p => OpenUrl(p is QueueItemViewModel q ? TrackDetailsResolver.AlbumUrlOf(q.Track) : null));
@@ -141,6 +167,50 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         LoadQueue();
         LoadCachedCollection();
         UpdatePendingCount();
+        _selectedTab = Queue.Count > 0 ? 1 : 0;
+    }
+
+    /// <summary>「探す」タブ。</summary>
+    public BrowseViewModel Browse { get; }
+
+    public ICommand OpenInBrowseCommand { get; }
+
+    /// <summary>0: 探す / 1: キュー</summary>
+    public int SelectedTab
+    {
+        get => _selectedTab;
+        set => Set(ref _selectedTab, value);
+    }
+
+    public static bool LooksLikeUrl(string? s)
+    {
+        s = s?.Trim() ?? "";
+        return s.Contains("://", StringComparison.Ordinal) || s.Contains(".bandcamp.com", StringComparison.OrdinalIgnoreCase)
+               || (s.Contains('.') && s.Contains('/') && !s.Contains(' '));
+    }
+
+    public bool IsQueued(long trackId) => _queuedTrackIds.Contains(trackId);
+
+    /// <summary>キューに入っていない曲 (試聴) を再生中か。</summary>
+    public bool IsPreview => Current is not null && !_queuedTrackIds.Contains(Current.Track.TrackId);
+
+    /// <summary>「探す」から: キューに入れずに試聴する。</summary>
+    public Task PreviewAsync(QueueItemViewModel item) => PlayItemAsync(item, userInitiated: true);
+
+    public bool RepeatOne
+    {
+        get => _settings.RepeatOne;
+        set
+        {
+            if (_settings.RepeatOne != value)
+            {
+                _settings.RepeatOne = value;
+                _settings.Save();
+                _player.IsLooping = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(PlayModeText));
+            }
+        }
     }
 
     public ObservableCollection<QueueItemViewModel> Queue { get; } = [];
@@ -236,7 +306,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string NowTitle => Current?.Title ?? "再生していません";
 
-    public string NowSubtitle => Current is null ? "" : $"{Current.Artist} — {Current.Album}";
+    public string NowSubtitle => Current is null ? "" : $"{(IsPreview ? "試聴中 · " : "")}{Current.Artist} — {Current.Album}";
 
     /// <summary>再生中の曲のサポーター数と値段。</summary>
     public string NowStats => Current is null
@@ -279,7 +349,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string PlayModeText => Shuffle ? "ランダム再生" : "表示順に再生";
+    public string PlayModeText => RepeatOne ? "1 曲リピート" : Shuffle ? "ランダム再生" : "表示順に再生";
 
     public bool HidePurchased
     {
@@ -580,22 +650,61 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void OnQueueChanged()
     {
         OnPropertyChanged(nameof(QueueSummary));
+        OnPropertyChanged(nameof(QueueHeader));
         OnPropertyChanged(nameof(IsQueueEmpty));
+        OnPropertyChanged(nameof(NowSubtitle));
+        Browse.RefreshQueuedFlags();
         CommandManager.InvalidateRequerySuggested();
     }
+
+    public string QueueHeader => $"キュー ({Queue.Count})";
 
     // ---- 曲ごとのサポーター数・値段 ----
 
     /// <summary>キャッシュ済みのページからサポーター数・値段・購入済みを計算し直す (リクエストは送らない)。</summary>
-    private void RefreshItem(QueueItemViewModel item)
+    public void RefreshItem(QueueItemViewModel item)
     {
         var details = TrackDetailsResolver.Resolve(item.Track, _client.TryGetCachedTralbum);
         item.Update(details);
         item.Purchase = TrackDetailsResolver.Purchased(item.Track, details, _ownedAlbums, _ownedTracks);
+        item.IsQueued = _queuedTrackIds.Contains(item.Track.TrackId);
         if (ReferenceEquals(item, Current))
         {
             OnPropertyChanged(nameof(NowStats));
         }
+    }
+
+    public bool OwnsAlbum(long id) => _ownedAlbums.Contains(id);
+
+    public bool OwnsTrack(long id) => _ownedTracks.Contains(id);
+
+    /// <summary>どこかでページを取得したら、キューと「探す」の該当行を更新する。</summary>
+    public void OnPageFetched(string url)
+    {
+        url = BandcampUrls.Normalize(url);
+        foreach (var item in Queue.Where(q => BandcampUrls.Normalize(q.Track.TrackUrl) == url
+                                              || (q.Details.AlbumUrl is { } a && BandcampUrls.Normalize(a) == url)))
+        {
+            RefreshItem(item);
+        }
+
+        Browse.OnPageFetched(url);
+    }
+
+    // ---- バックグラウンド処理の表示 (キュー・探す 共通) ----
+
+    public CancellationToken BeginJob(string text)
+    {
+        ActiveJobs++;
+        JobText = text;
+        JobProgress = -1;
+        return _jobsCts.Token;
+    }
+
+    public void ReportJob(string text, double progress)
+    {
+        JobText = text;
+        JobProgress = progress;
     }
 
     private void UpdatePendingCount()
@@ -609,23 +718,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CommandManager.InvalidateRequerySuggested();
     }
 
+    public bool IsFetchingDetails => _fetchingDetails;
+
     /// <summary>
-    /// 曲ページ (曲単体のサポーター数・値段) と、未取得のアルバムページを取得する。
-    /// 1 曲 1 リクエストなので、選択があれば選択した曲だけ、なければ表示中の曲を上から順に。
+    /// 曲ページ (曲単体のサポーター数・値段) と、未取得のアルバムページを取得する。1 ページ 1 リクエスト。
+    /// キューからも「探す」からも使う。
     /// </summary>
-    private async Task FetchDetailsAsync(IReadOnlyList<QueueItemViewModel> selected)
+    public async Task FetchDetailsAsync(IReadOnlyList<QueueItemViewModel> targets)
     {
-        var targets = selected.Count > 0 ? selected : QueueView.Cast<QueueItemViewModel>().ToList();
         var urls = targets.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().ToList();
         if (urls.Count == 0)
         {
-            StatusText = "選択した曲の情報はすべて取得済みです";
+            StatusText = "曲の情報はすべて取得済みです";
             return;
         }
 
         var seen = new HashSet<string>(urls);
-        var ct = _jobsCts.Token;
-        ActiveJobs++;
+        _fetchingDetails = true;
+        var ct = BeginJob("曲の情報を取得中…");
         var done = 0;
         var errors = 0;
         try
@@ -635,8 +745,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 var url = urls[i];
                 ct.ThrowIfCancellationRequested();
                 var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (urls.Count - done));
-                JobText = $"曲の情報を取得中 {done}/{urls.Count} (残り約 {Format.Eta(eta)})";
-                JobProgress = (double)done / urls.Count;
+                ReportJob($"曲の情報を取得中 {done}/{urls.Count} (残り約 {Format.Eta(eta)})", (double)done / urls.Count);
                 try
                 {
                     await _client.GetTralbumAsync(url, RequestPriority.Background, ct: ct);
@@ -648,13 +757,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 }
 
                 done++;
-                foreach (var item in Queue.Where(q => BandcampUrls.Normalize(q.Track.TrackUrl) == url
-                                                      || (q.Details.AlbumUrl is { } a && BandcampUrls.Normalize(a) == url)))
-                {
-                    RefreshItem(item);
+                OnPageFetched(url);
 
-                    // 曲ページを取って初めて収録アルバムが分かった場合は、そのアルバムページも続けて取る
-                    foreach (var missing in item.Details.MissingPages(item.Track).Select(BandcampUrls.Normalize))
+                // 曲ページを取って初めて収録アルバムが分かった場合は、そのアルバムページも続けて取る
+                foreach (var target in targets.Where(t => BandcampUrls.Normalize(t.Track.TrackUrl) == url))
+                {
+                    RefreshItem(target);
+                    foreach (var missing in target.Details.MissingPages(target.Track).Select(BandcampUrls.Normalize))
                     {
                         if (seen.Add(missing))
                         {
@@ -672,6 +781,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            _fetchingDetails = false;
             EndJob();
             UpdatePendingCount();
         }
@@ -683,6 +793,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task RefreshCollectionAsync()
     {
+        _loadingCollection = true;
         ActiveJobs++;
         JobProgress = -1;
         JobText = "コレクションを確認中…";
@@ -717,6 +828,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            _loadingCollection = false;
             EndJob();
         }
     }
@@ -730,6 +842,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             RefreshItem(item);
         }
 
+        Browse.RefreshAll();
         CollectionStatus = !HasProfile ? "プロフィール未設定 (設定から登録すると購入済みに印が付きます)"
             : collection is null ? $"{BandcampUsername} のコレクション: 未読み込み"
             : collection.Complete ? $"{BandcampUsername} のコレクション: {collection.Count} 件 ({collection.FetchedAt.ToLocalTime():M/d HH:mm} 時点)"
@@ -737,7 +850,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(QueueSummary));
     }
 
-    private void EndJob()
+    public void EndJob()
     {
         ActiveJobs--;
         if (ActiveJobs == 0)
@@ -965,6 +1078,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     // ---- Chrome 拡張から ----
+
+    public Task BrowseFromExtensionAsync(string url) =>
+        Application.Current.Dispatcher.InvokeAsync(() =>
+        {
+            InputUrl = url;
+            SelectedTab = 0;
+            if (Application.Current.MainWindow is { } w)
+            {
+                if (w.WindowState == WindowState.Minimized)
+                {
+                    w.WindowState = WindowState.Normal;
+                }
+
+                w.Activate();
+            }
+
+            _ = RunSafeAsync(Browse.OpenAsync(url));
+        }).Task;
 
     public Task EnqueueFromExtensionAsync(string url) =>
         Application.Current.Dispatcher.InvokeAsync(() =>

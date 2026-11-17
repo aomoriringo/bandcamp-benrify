@@ -104,6 +104,18 @@ public class ThrottleTests
     }
 
     [Fact]
+    public async Task BotChallengePageStopsWithoutRetry()
+    {
+        var handler = new FakeHandler(_ => Ok("<!DOCTYPE html><html><head><link href=\"/_fs-ch-1T1wmsGaOgGaSxcX/assets/styles.css\" rel=\"stylesheet\" /></head></html>"));
+        using var client = new ThrottledHttpClient(TimeSpan.FromSeconds(2), handler, (_, _) => Task.CompletedTask);
+
+        await Assert.ThrowsAsync<BandcampBlockedException>(() => client.GetAsync("https://bandcamp.com/search?q=x", RequestPriority.Interactive));
+
+        Assert.Single(handler.Requests); // 再試行しない
+        Assert.Equal(TimeSpan.FromSeconds(4), client.MinInterval); // 間隔を広げる
+    }
+
+    [Fact]
     public async Task CancelledRequestsAreNeverSent()
     {
         var handler = new FakeHandler(_ => Ok());

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Bandcamp Benrify Connector",
-  "version": "0.2.0",
-  "description": "Bandcamp のページやリンクを Windows アプリ「Bandcamp Benrify」のキューに送ります。",
+  "version": "0.3.0",
+  "description": "Bandcamp のページやリンクを Windows アプリ「Bandcamp Benrify」で開いたり、キューに送ったりします。",
   "permissions": ["contextMenus", "activeTab"],
   "host_permissions": ["http://localhost:47823/*"],
   "background": {

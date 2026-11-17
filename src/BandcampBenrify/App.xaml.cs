@@ -28,7 +28,7 @@ public partial class App : Application
         {
             try
             {
-                _api = new LocalApiServer(settings.LocalApiPort, _vm.EnqueueFromExtensionAsync);
+                _api = new LocalApiServer(settings.LocalApiPort, _vm.EnqueueFromExtensionAsync, _vm.BrowseFromExtensionAsync);
                 _api.Start();
             }
             catch (HttpListenerException ex)

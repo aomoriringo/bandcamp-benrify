@@ -1,4 +1,4 @@
-﻿<Window x:Class="BandcampBenrify.MainWindow"
+<Window x:Class="BandcampBenrify.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:BandcampBenrify.ViewModels"
@@ -38,20 +38,23 @@
     </Window.Resources>
 
     <DockPanel>
-        <!-- URL 入力 -->
-        <Grid DockPanel.Dock="Top" Margin="12,12,12,6">
+        <!-- URL / キーワード入力 -->
+        <Grid DockPanel.Dock="Top" Margin="12,12,12,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid>
                 <TextBox x:Name="UrlBox" Text="{Binding InputUrl, UpdateSourceTrigger=PropertyChanged}"
                          VerticalContentAlignment="Center" Padding="6,5" FontSize="14">
                     <TextBox.InputBindings>
-                        <KeyBinding Key="Enter" Command="{Binding AddUrlCommand}" />
+                        <KeyBinding Key="Enter" Command="{Binding OpenInBrowseCommand}" />
+                        <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddUrlCommand}" />
                     </TextBox.InputBindings>
                 </TextBox>
-                <TextBlock Text="Bandcamp の URL を貼り付けて Enter — 曲 → その曲 / アルバム → 全曲 / レーベル・アーティスト → 全作品の全曲" Margin="9,0,0,0"
+                <TextBlock Text="Bandcamp の URL (レーベル・アーティスト・アルバム・曲) — Enter で「探す」、Ctrl+Enter でそのままキューへ (キーワードならブラウザで検索)" Margin="9,0,0,0"
                            VerticalAlignment="Center" Foreground="{StaticResource MutedText}" IsHitTestVisible="False">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -65,20 +68,11 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
-            <Button Grid.Column="1" Content="キューに追加" Command="{Binding AddUrlCommand}" Padding="18,6" />
-        </Grid>
-
-        <!-- キューの操作 -->
-        <DockPanel DockPanel.Dock="Top" Margin="12,0,12,6" LastChildFill="False">
-            <Button x:Name="FetchDetailsButton" Content="{Binding DetailsButtonText}" Margin="0"
-                    Command="{Binding FetchDetailsCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}"
-                    ToolTip="曲ページを取得して、曲単体のサポーター数と値段を調べます (1 曲 1 リクエスト)。&#10;曲を選択していれば選択した曲だけ、していなければ表示中の曲を上から順に取得します。" />
-            <CheckBox x:Name="HidePurchasedCheck" Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="16,0,0,0"
-                      ToolTip="購入済みの曲を一覧と再生対象から外します (コレクションの読み込みが必要)" />
-            <Button x:Name="ResetSortButton" Content="追加順に戻す" Click="ResetSort_Click" ToolTip="列の並び替えを解除して、キューに追加した順に戻します" Margin="12,0,0,0" />
-            <TextBlock Text="{Binding QueueSummary}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{StaticResource MutedText}" />
-
-            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+            <Button x:Name="BrowseButton" Grid.Column="1" Content="探す" Command="{Binding OpenInBrowseCommand}" Padding="18,6"
+                    ToolTip="「探す」タブで作品一覧や検索結果を表示して、曲を選んでキューに入れます (Enter)" />
+            <Button Grid.Column="2" Content="キューに追加" Command="{Binding AddUrlCommand}" Padding="14,6"
+                    ToolTip="URL の曲・アルバムの全曲・レーベルの全作品の全曲を、選ばずにそのままキューへ (Ctrl+Enter)" />
+            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="16,0,0,0">
                 <TextBlock Text="{Binding CollectionStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" />
                 <Button x:Name="RefreshCollectionButton" Content="コレクション更新" Command="{Binding RefreshCollectionCommand}" Margin="8,0,0,0"
                         ToolTip="Bandcamp の公開コレクションを読み込み直して、購入済みの印を更新します" />
@@ -89,7 +83,7 @@
                     </StackPanel>
                 </Button>
             </StackPanel>
-        </DockPanel>
+        </Grid>
 
         <!-- ステータスバー -->
         <StatusBar DockPanel.Dock="Bottom">
@@ -129,6 +123,8 @@
                     <StackPanel Orientation="Horizontal">
                         <ToggleButton x:Name="ShuffleToggle" AutomationProperties.Name="ランダム再生" Style="{StaticResource IconToggle}" Content="&#xE8B1;" IsChecked="{Binding Shuffle}"
                                       ToolTip="オン: キュー全体からランダム / オフ: 表示の順番 (並び替えた順) に上から再生" />
+                        <ToggleButton x:Name="RepeatOneToggle" AutomationProperties.Name="1曲リピート" Style="{StaticResource IconToggle}" Content="&#xE8ED;" IsChecked="{Binding RepeatOne}"
+                                      ToolTip="1 曲リピート: 今の曲を繰り返し再生します (「次へ」で次の曲に進めます)" />
                         <Button x:Name="PrevButton" AutomationProperties.Name="前へ" Style="{StaticResource IconButton}" Content="&#xE892;" Command="{Binding PreviousCommand}" ToolTip="前へ (Ctrl+←)" />
                         <Button x:Name="PlayButton" AutomationProperties.Name="再生 / 一時停止" Style="{StaticResource IconButton}" Content="{Binding PlayPauseGlyph}" FontSize="24" Width="52"
                                 Command="{Binding PlayPauseCommand}" ToolTip="再生 / 一時停止 (Ctrl+Space)" />
@@ -171,15 +167,196 @@
             </DockPanel>
         </Border>
 
-        <!-- キュー -->
-        <Grid Margin="12,0,12,8">
+        <TabControl x:Name="MainTabs" SelectedIndex="{Binding SelectedTab}" Margin="12,0,12,8">
+            <!-- 探す -->
+            <TabItem Header="探す" DataContext="{Binding Browse}">
+                <DockPanel Margin="0,8,0,0">
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
+                        <Button x:Name="BackButton" Command="{Binding BackCommand}" Margin="0" Padding="8,4" ToolTip="前に開いていた一覧に戻る">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE72B;" />
+                        </Button>
+                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" Margin="10,0,0,0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button x:Name="FetchReleaseInfoButton" Content="{Binding ReleaseInfoButtonText}" Command="{Binding FetchReleaseInfoCommand}"
+                                    ToolTip="一覧の作品ページを取得して、サポーター数・値段・リリース日を表示します (1 作品 1 リクエスト)。取得済みの作品はすぐ表示されます。" />
+                            <TextBlock Text="絞り込み" VerticalAlignment="Center" Margin="16,0,6,0" Foreground="{StaticResource MutedText}" />
+                            <TextBox x:Name="BrowseFilterBox" Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" Width="180" Padding="4,3" VerticalContentAlignment="Center"
+                                     ToolTip="タイトル・アーティストで一覧を絞り込みます (Bandcamp には問い合わせません)" />
+                            <CheckBox Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="12,0,0,0" />
+                        </StackPanel>
+                    </DockPanel>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" MinWidth="360" />
+                            <ColumnDefinition Width="6" />
+                            <ColumnDefinition Width="2*" MinWidth="360" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- 作品一覧 -->
+                        <DockPanel>
+                            <Grid>
+                                <DataGrid x:Name="ReleaseGrid" ItemsSource="{Binding ItemsView}" SelectedItem="{Binding SelectedItem}"
+                                          AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended" HeadersVisibility="Column"
+                                          GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEF0F2" RowHeight="44"
+                                          EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                                          ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="ReleaseGrid_MouseDoubleClick">
+                                    <DataGrid.InputBindings>
+                                        <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddReleasesCommand}" CommandParameter="{Binding SelectedItems, ElementName=ReleaseGrid}" />
+                                    </DataGrid.InputBindings>
+                                    <DataGrid.RowStyle>
+                                        <Style TargetType="DataGridRow">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPurchased}" Value="True">
+                                                    <Setter Property="Foreground" Value="#7A8590" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </DataGrid.RowStyle>
+                                    <DataGrid.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="選択した作品の全曲をキューに追加" Command="{Binding PlacementTarget.DataContext.AddReleasesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="アーティスト / レーベルを開く" Command="{Binding PlacementTarget.DataContext.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        </ContextMenu>
+                                    </DataGrid.ContextMenu>
+                                    <DataGrid.Columns>
+                                        <DataGridTemplateColumn Width="48" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:BrowseItemViewModel">
+                                                    <Image Source="{Binding ArtUrl, TargetNullValue={x:Null}}" Width="40" Height="40" Stretch="UniformToFill" />
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTextColumn Header="種類" Binding="{Binding KindLabel}" Width="70" ElementStyle="{StaticResource CellText}" />
+                                        <DataGridTextColumn Header="購入済み" Binding="{Binding PurchaseText}" Width="86" ElementStyle="{StaticResource PurchaseCell}" />
+                                        <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="2*" MinWidth="120" ElementStyle="{StaticResource CellText}" />
+                                        <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="*" MinWidth="80" ElementStyle="{StaticResource CellText}" />
+                                        <DataGridTextColumn Header="サポーター" Binding="{Binding SupText}" SortMemberPath="SupSort" Width="80" ElementStyle="{StaticResource TotalCell}" />
+                                        <DataGridTextColumn Header="値段" Binding="{Binding PriceText}" SortMemberPath="PriceSort" Width="70" ElementStyle="{StaticResource NumCell}" />
+                                        <DataGridTextColumn Header="リリース日" Binding="{Binding ReleaseDateText}" SortMemberPath="ReleaseDate" Width="90" ElementStyle="{StaticResource CellText}" />
+                                        <DataGridTextColumn Header="曲数" Binding="{Binding TrackCount}" Width="50" ElementStyle="{StaticResource NumCell}" />
+                                        <DataGridTextColumn Header="状態" Binding="{Binding StateText}" Width="80" ElementStyle="{StaticResource CellText}" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                                            Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="作品を探す" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource MutedText}" />
+                                    <TextBlock Margin="0,10,0,0" Foreground="{StaticResource MutedText}" TextAlignment="Center" LineHeight="24">
+                                        上の欄にレーベル・アーティスト・アルバムの URL を入れて Enter、<LineBreak />
+                                        または Chrome 拡張の「Benrify の「探す」で開く」で作品一覧を表示します<LineBreak />
+                                        作品を選ぶと右に曲目が出ます。ダブルクリックで試聴、選んでキューに追加。
+                                    </TextBlock>
+                                </StackPanel>
+                            </Grid>
+                        </DockPanel>
+
+                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+                        <!-- 選んだ作品の曲目 -->
+                        <DockPanel Grid.Column="2">
+                            <Grid DockPanel.Dock="Top" Margin="4,0,0,8" Visibility="{Binding HasSelectedRelease, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Border Width="112" Height="112" Background="#DDE2E6" CornerRadius="3" ClipToBounds="True">
+                                    <Image Source="{Binding SelectedArtUrl, TargetNullValue={x:Null}}" Stretch="UniformToFill" />
+                                </Border>
+                                <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding SelectedItem.Title}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="{Binding SelectedItem.Artist}" Foreground="{StaticResource MutedText}" Margin="0,2,0,0" />
+                                    <TextBlock Text="{Binding SelectedSummary}" Foreground="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button x:Name="AddReleaseButton" Content="この作品の全曲をキューに追加" Command="{Binding AddCurrentReleaseCommand}" Margin="0,0,6,0" />
+                                        <Button Content="Bandcamp で開く" Command="{Binding OpenInBrowserCommand}" Margin="0" />
+                                    </WrapPanel>
+                                </StackPanel>
+                            </Grid>
+                            <WrapPanel DockPanel.Dock="Top" Margin="4,0,0,6" Visibility="{Binding HasSelectedRelease, Converter={StaticResource BoolToVis}}">
+                                <Button x:Name="AddTracksButton" Content="選択した曲をキューに追加" Command="{Binding AddTracksCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" Margin="0,0,6,0" />
+                                <Button x:Name="FetchTrackInfoButton" Content="曲の情報を取得" Command="{Binding FetchTrackInfoCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" Margin="0"
+                                        ToolTip="曲ページを取得して、曲単体のサポーター数と値段を表示します (1 曲 1 リクエスト)。選択があれば選択した曲だけ。" />
+                                <TextBlock Text="ダブルクリックで試聴 (キューには入りません)" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{StaticResource MutedText}" FontSize="12" />
+                            </WrapPanel>
+                            <DataGrid x:Name="TrackGrid" Margin="4,0,0,0" ItemsSource="{Binding Tracks}" AutoGenerateColumns="False" IsReadOnly="True"
+                                      SelectionMode="Extended" HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEF0F2" RowHeight="30"
+                                      ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="TrackGrid_MouseDoubleClick"
+                                      Visibility="{Binding HasSelectedRelease, Converter={StaticResource BoolToVis}}">
+                                <DataGrid.InputBindings>
+                                    <KeyBinding Key="Enter" Command="{Binding PreviewCommand}" CommandParameter="{Binding SelectedItem, ElementName=TrackGrid}" />
+                                    <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddTracksCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" />
+                                </DataGrid.InputBindings>
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsPurchased}" Value="True">
+                                                <Setter Property="Foreground" Value="#7A8590" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsStreamable}" Value="False">
+                                                <Setter Property="Foreground" Value="#B0B8BF" />
+                                                <Setter Property="ToolTip" Value="試聴が公開されていない曲です" />
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                                <Setter Property="FontWeight" Value="Bold" />
+                                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                                <Setter Property="Background" Value="#EAF6FA" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="試聴" Command="{Binding PlacementTarget.DataContext.PreviewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="キューに追加" Command="{Binding PlacementTarget.DataContext.AddTracksCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="曲の情報を取得" Command="{Binding PlacementTarget.DataContext.FetchTrackInfoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#" Binding="{Binding Seq}" Width="36" ElementStyle="{StaticResource NumCell}" />
+                                    <DataGridTextColumn Header="キュー" Binding="{Binding QueuedText}" Width="52" ElementStyle="{StaticResource PurchaseCell}" />
+                                    <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="*" MinWidth="120" ElementStyle="{StaticResource CellText}" />
+                                    <DataGridTextColumn Header="購入済み" Binding="{Binding PurchaseText}" Width="80" ElementStyle="{StaticResource PurchaseCell}" />
+                                    <DataGridTextColumn Header="サポーター計" Binding="{Binding TotalText}" SortMemberPath="TotalSort" Width="86" ElementStyle="{StaticResource TotalCell}" />
+                                    <DataGridTextColumn Header="うち曲単体" Binding="{Binding TrackSupText}" SortMemberPath="TrackSupSort" Width="72" ElementStyle="{StaticResource NumCell}" />
+                                    <DataGridTextColumn Header="曲の値段" Binding="{Binding TrackPriceText}" SortMemberPath="TrackPriceSort" Width="72" ElementStyle="{StaticResource NumCell}" />
+                                    <DataGridTextColumn Header="長さ" Binding="{Binding Duration}" SortMemberPath="DurationSeconds" Width="52" ElementStyle="{StaticResource NumCell}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </Grid>
+                </DockPanel>
+            </TabItem>
+
+            <!-- キュー -->
+            <TabItem Header="{Binding QueueHeader}">
+            <DockPanel Margin="0,8,0,0">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
+                    <Button x:Name="FetchDetailsButton" Content="{Binding DetailsButtonText}" Margin="0"
+                            Command="{Binding FetchDetailsCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}"
+                            ToolTip="曲ページを取得して、曲単体のサポーター数と値段を調べます (1 曲 1 リクエスト)。&#10;曲を選択していれば選択した曲だけ、していなければ表示中の曲を上から順に取得します。" />
+                    <CheckBox x:Name="HidePurchasedCheck" Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="16,0,0,0"
+                              ToolTip="購入済みの曲を一覧と再生対象から外します (コレクションの読み込みが必要)" />
+                    <Button x:Name="ResetSortButton" Content="追加順に戻す" Click="ResetSort_Click" ToolTip="列の並び替えを解除して、キューに追加した順に戻します" Margin="12,0,0,0" />
+                    <Button Content="すべて削除" Command="{Binding ClearQueueCommand}" Margin="6,0,0,0" />
+                    <TextBlock Text="{Binding QueueSummary}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{StaticResource MutedText}" />
+                </DockPanel>
+                <Grid>
             <DataGrid x:Name="QueueGrid" ItemsSource="{Binding QueueView}" AutoGenerateColumns="False" IsReadOnly="True"
                       SelectionMode="Extended" SelectionUnit="FullRow" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                       HorizontalGridLinesBrush="#EEF0F2" RowHeight="30" CanUserReorderColumns="True" CanUserResizeColumns="True"
                       EnableRowVirtualization="True" EnableColumnVirtualization="True"
                       VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                       ColumnHeaderStyle="{StaticResource SortableHeader}"
-                      Sorting="QueueGrid_Sorting" MouseDoubleClick="QueueGrid_MouseDoubleClick">
+                      Sorting="Grid_Sorting" MouseDoubleClick="QueueGrid_MouseDoubleClick">
                 <DataGrid.InputBindings>
                     <KeyBinding Key="Delete" Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}" />
                     <KeyBinding Key="Enter" Command="{Binding PlayItemCommand}" CommandParameter="{Binding SelectedItem, ElementName=QueueGrid}" />
@@ -254,11 +431,14 @@
                         Visibility="{Binding IsQueueEmpty, Converter={StaticResource BoolToVis}}">
                 <TextBlock Text="キューは空です" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource MutedText}" />
                 <TextBlock Margin="0,10,0,0" Foreground="{StaticResource MutedText}" TextAlignment="Center" LineHeight="24">
-                    上の欄に Bandcamp の URL を貼り付けて Enter<LineBreak />
+                    「探す」タブで作品や曲を選んで追加するか、URL を貼って「キューに追加」<LineBreak />
                     列の見出しをクリックするとサポーター数や値段で並び替えられます。<LineBreak />
                     ランダム再生をオフにすると、並べた順に上から再生します。
                 </TextBlock>
             </StackPanel>
-        </Grid>
+                </Grid>
+            </DockPanel>
+            </TabItem>
+        </TabControl>
     </DockPanel>
 </Window>
