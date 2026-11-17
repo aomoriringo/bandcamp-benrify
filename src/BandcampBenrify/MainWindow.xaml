@@ -1,4 +1,5 @@
 <Window x:Class="BandcampBenrify.MainWindow"
+        Icon="/Assets/app.ico"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:BandcampBenrify.ViewModels"
@@ -200,10 +201,7 @@
                                           AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Extended" HeadersVisibility="Column"
                                           GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEF0F2" RowHeight="44"
                                           EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                                          ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="ReleaseGrid_MouseDoubleClick">
-                                    <DataGrid.InputBindings>
-                                        <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddReleasesCommand}" CommandParameter="{Binding SelectedItems, ElementName=ReleaseGrid}" />
-                                    </DataGrid.InputBindings>
+                                          ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="ReleaseGrid_MouseDoubleClick" PreviewKeyDown="ReleaseGrid_PreviewKeyDown">
                                     <DataGrid.RowStyle>
                                         <Style TargetType="DataGridRow">
                                             <Style.Triggers>
@@ -284,12 +282,8 @@
                             </WrapPanel>
                             <DataGrid x:Name="TrackGrid" Margin="4,0,0,0" ItemsSource="{Binding Tracks}" AutoGenerateColumns="False" IsReadOnly="True"
                                       SelectionMode="Extended" HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#EEF0F2" RowHeight="30"
-                                      ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="TrackGrid_MouseDoubleClick"
+                                      ColumnHeaderStyle="{StaticResource SortableHeader}" Sorting="Grid_Sorting" MouseDoubleClick="TrackGrid_MouseDoubleClick" PreviewKeyDown="TrackGrid_PreviewKeyDown"
                                       Visibility="{Binding HasSelectedRelease, Converter={StaticResource BoolToVis}}">
-                                <DataGrid.InputBindings>
-                                    <KeyBinding Key="Enter" Command="{Binding PreviewCommand}" CommandParameter="{Binding SelectedItem, ElementName=TrackGrid}" />
-                                    <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddTracksCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" />
-                                </DataGrid.InputBindings>
                                 <DataGrid.RowStyle>
                                     <Style TargetType="DataGridRow">
                                         <Style.Triggers>
@@ -356,11 +350,7 @@
                       EnableRowVirtualization="True" EnableColumnVirtualization="True"
                       VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                       ColumnHeaderStyle="{StaticResource SortableHeader}"
-                      Sorting="Grid_Sorting" MouseDoubleClick="QueueGrid_MouseDoubleClick">
-                <DataGrid.InputBindings>
-                    <KeyBinding Key="Delete" Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}" />
-                    <KeyBinding Key="Enter" Command="{Binding PlayItemCommand}" CommandParameter="{Binding SelectedItem, ElementName=QueueGrid}" />
-                </DataGrid.InputBindings>
+                      Sorting="Grid_Sorting" MouseDoubleClick="QueueGrid_MouseDoubleClick" PreviewKeyDown="QueueGrid_PreviewKeyDown">
                 <DataGrid.RowStyle>
                     <Style TargetType="DataGridRow">
                         <Style.Triggers>

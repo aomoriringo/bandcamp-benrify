@@ -27,6 +27,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly PlaybackOrder<QueueItemViewModel> _order = new();
     private readonly HashSet<long> _queuedTrackIds = [];
     private readonly DispatcherTimer _timer;
+    private readonly DispatcherTimer _pendingTimer;
     private CancellationTokenSource _jobsCts = new();
     private CancellationTokenSource? _playCts;
     private string? _lastHttpMessage;
@@ -122,6 +123,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
+        _pendingTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
+        _pendingTimer.Tick += (_, _) => UpdatePendingCount();
 
         AsyncCommand.ErrorHandler = ex => StatusText = "エラー: " + ex.Message;
 
@@ -642,6 +645,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _order.Reset();
         }
 
+        // 「#」を追加順のまま 1 から詰め直す
+        _nextSeq = 0;
+        foreach (var item in Queue)
+        {
+            item.Seq = ++_nextSeq;
+        }
+
         OnQueueChanged();
         UpdatePendingCount();
         SaveQueue();
@@ -649,6 +659,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void OnQueueChanged()
     {
+        SchedulePendingUpdate();
         OnPropertyChanged(nameof(QueueSummary));
         OnPropertyChanged(nameof(QueueHeader));
         OnPropertyChanged(nameof(IsQueueEmpty));
@@ -689,6 +700,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         Browse.OnPageFetched(url);
+        SchedulePendingUpdate();
     }
 
     // ---- バックグラウンド処理の表示 (キュー・探す 共通) ----
@@ -707,8 +719,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         JobProgress = progress;
     }
 
+    /// <summary>
+    /// 未取得ページ数の再計算を少し後にまとめて行う (レーベル全曲の追加などで 1 曲ずつ追加されても重くならないように)。
+    /// </summary>
+    private void SchedulePendingUpdate()
+    {
+        _pendingTimer.Stop();
+        _pendingTimer.Start();
+    }
+
     private void UpdatePendingCount()
     {
+        _pendingTimer.Stop();
         PendingPageCount = Queue.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().Count();
         var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * PendingPageCount);
         DetailsButtonText = PendingPageCount == 0

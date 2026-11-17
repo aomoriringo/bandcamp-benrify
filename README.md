@@ -10,6 +10,19 @@ Bandcamp を便利に聴くための Windows アプリです。
 - **値段**: 曲単体とアルバムのデジタル版の値段 (最低価格) を表示
 - **Chrome 拡張 (任意)**: Bandcamp のページ上で右クリック → 「Benrify の「探す」で開く」「Benrify のキューに追加」
 
+## インストール
+
+[.NET 10 SDK](https://dotnet.microsoft.com/download) を入れた Windows 10 (19041) 以降で、リポジトリのフォルダで次を実行します (管理者権限は不要)。
+
+```powershell
+pwsh -File install.ps1            # スタートメニューに登録
+pwsh -File install.ps1 -Desktop   # デスクトップにもショートカットを作る
+```
+
+- アプリは `%LOCALAPPDATA%\Programs\BandcampBenrify` に入り、スタートメニューで「Bandcamp」と検索して起動できます
+- 更新するときも同じコマンドを実行します (アプリを終了してから。設定・キュー・キャッシュはそのまま)
+- 取り除くときは `pwsh -File uninstall.ps1` (設定などのデータも消すなら `-RemoveData`)
+
 ## Bandcamp への負荷について
 
 Bandcamp に過剰なリクエストを送らないことを最優先にしています。
@@ -137,6 +150,8 @@ src/BandcampBenrify.Core   取得・解析・キャッシュ・スロットリ�
 src/BandcampBenrify        WPF アプリ (再生は Windows.Media.Playback)
 tests/                     xUnit テスト
 extension/                 Chrome 拡張 (Manifest V3)
+tools/make-icon.ps1        アプリのアイコン (Assets/app.ico) を作り直すスクリプト
+install.ps1 / uninstall.ps1  スタートメニューへの登録 / 削除
 ```
 
 ## 注意

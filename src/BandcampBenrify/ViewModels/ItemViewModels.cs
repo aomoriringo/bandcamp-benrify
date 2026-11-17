@@ -21,8 +21,14 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
 
     public TrackInfo Track { get; } = track;
 
-    /// <summary>キューに追加された順番 (並び替えを戻すときに使う)。</summary>
-    public int Seq { get; } = seq;
+    private int _seq = seq;
+
+    /// <summary>キューに追加された順番 (1 始まり。削除したら詰め直す)。「探す」の曲目ではトラック番号。</summary>
+    public int Seq
+    {
+        get => _seq;
+        set => Set(ref _seq, value);
+    }
 
     public string Title => Track.Title;
 

@@ -152,6 +152,60 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Delete キーで削除。DataGrid は Delete を自前の行削除コマンドで先に処理してしまう (読み取り専用だと何もしない) ので、
+    /// InputBindings ではなくここで拾う。
+    /// </summary>
+    private void QueueGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Vm is not { } vm)
+        {
+            return;
+        }
+
+        if (e.Key == Key.Delete)
+        {
+            e.Handled = Run(vm.RemoveSelectedCommand, QueueGrid.SelectedItems);
+        }
+        else if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            e.Handled = Run(vm.PlayItemCommand, QueueGrid.SelectedItem);
+        }
+    }
+
+    /// <summary>探す: 曲目で Enter = 試聴、Ctrl+Enter = キューに追加。</summary>
+    private void TrackGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Vm is not { } vm || e.Key != Key.Enter)
+        {
+            return;
+        }
+
+        e.Handled = Keyboard.Modifiers == ModifierKeys.Control
+            ? Run(vm.Browse.AddTracksCommand, TrackGrid.SelectedItems)
+            : Run(vm.Browse.PreviewCommand, TrackGrid.SelectedItem);
+    }
+
+    /// <summary>探す: 作品一覧で Ctrl+Enter = 選んだ作品の全曲をキューに追加。</summary>
+    private void ReleaseGrid_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Vm is { } vm && e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            e.Handled = Run(vm.Browse.AddReleasesCommand, ReleaseGrid.SelectedItems);
+        }
+    }
+
+    private static bool Run(ICommand command, object? parameter)
+    {
+        if (!command.CanExecute(parameter))
+        {
+            return false;
+        }
+
+        command.Execute(parameter);
+        return true;
+    }
+
     private void QueueGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject)?.DataContext is QueueItemViewModel item
