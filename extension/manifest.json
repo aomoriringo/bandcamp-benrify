@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Bandcamp Benrify Connector",
+  "version": "0.1.0",
+  "description": "Bandcamp のページやリンクを Windows アプリ「Bandcamp Benrify」のキューやランキングに送ります。",
+  "permissions": ["contextMenus", "activeTab"],
+  "host_permissions": ["http://localhost:47823/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Bandcamp Benrify",
+    "default_popup": "popup.html"
+  }
+}

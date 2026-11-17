@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/BandcampBenrify.Core/BandcampBenrify.Core.csproj" />
+    <Project Path="src/BandcampBenrify/BandcampBenrify.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/BandcampBenrify.Core.Tests/BandcampBenrify.Core.Tests.csproj" />
+  </Folder>
+</Solution>
