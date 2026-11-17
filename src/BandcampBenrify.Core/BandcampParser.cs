@@ -47,6 +47,14 @@ public static partial class BandcampParser
             ?? ParseBandcampDate(GetString(current, "publish_date"));
         var id = GetLong(root, "id") ?? GetLong(current, "id") ?? 0;
 
+        // 収録アルバム: アルバムページなら自分自身、曲ページなら current.album_id / album_url
+        long? albumId = type == ItemType.Album ? id : GetLong(current, "album_id");
+        var albumUrl = type == ItemType.Album ? url : StripQuery(ToAbsolute(baseUri, GetString(root, "album_url")));
+        if (albumId is 0)
+        {
+            albumId = null;
+        }
+
         var tracks = new List<TrackInfo>();
         if (root.TryGetProperty("trackinfo", out var trackinfo) && trackinfo.ValueKind == JsonValueKind.Array)
         {
@@ -79,6 +87,8 @@ public static partial class BandcampParser
                     DurationSeconds = GetDouble(t, "duration") ?? 0,
                     ArtId = artId,
                     StreamUrl = stream,
+                    AlbumId = albumId,
+                    AlbumUrl = albumUrl,
                 });
             }
         }
@@ -94,8 +104,166 @@ public static partial class BandcampParser
             ReleaseDate = releaseDate,
             Tracks = tracks,
             Supporters = ParseSupporters(doc),
+            Price = ParsePrice(doc, url, current),
+            AlbumId = type == ItemType.Track ? albumId : null,
+            AlbumUrl = type == ItemType.Track ? albumUrl : null,
             FetchedAt = fetchedAt,
         };
+    }
+
+    /// <summary>
+    /// デジタル版の値段。JSON-LD のうち @id がこのページの URL で offers を持つもの
+    /// (アルバム: albumRelease[], 曲: inAlbum.albumRelease[]) から取る。単品で買えない曲は見つからず null。
+    /// </summary>
+    private static PriceInfo? ParsePrice(IDocument doc, string url, JsonElement current)
+    {
+        var orMore = GetBool(current, "is_set_price") != true;
+        foreach (var script in doc.QuerySelectorAll("script[type='application/ld+json']"))
+        {
+            using var ld = TryParseJson(script.TextContent);
+            if (ld is null)
+            {
+                continue;
+            }
+
+            if (FindOffers(ld.RootElement, url) is { } offers)
+            {
+                var amount = GetDecimal(offers, "price");
+                if (offers.TryGetProperty("priceSpecification", out var spec) && GetDecimal(spec, "minPrice") is decimal min)
+                {
+                    amount = min;
+                }
+
+                if (amount is decimal a)
+                {
+                    return new PriceInfo { Amount = a, Currency = GetString(offers, "priceCurrency") ?? "", OrMore = orMore };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonElement? FindOffers(JsonElement e, string url)
+    {
+        switch (e.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (GetString(e, "@id") is string id && SameUrl(id, url) && e.TryGetProperty("offers", out var offers))
+                {
+                    if (offers.ValueKind == JsonValueKind.Object)
+                    {
+                        return offers;
+                    }
+
+                    if (offers.ValueKind == JsonValueKind.Array && offers.GetArrayLength() > 0)
+                    {
+                        return offers[0];
+                    }
+                }
+
+                foreach (var p in e.EnumerateObject())
+                {
+                    if (FindOffers(p.Value, url) is { } found)
+                    {
+                        return found;
+                    }
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in e.EnumerateArray())
+                {
+                    if (FindOffers(item, url) is { } found)
+                    {
+                        return found;
+                    }
+                }
+
+                break;
+        }
+
+        return null;
+    }
+
+    private static bool SameUrl(string a, string b)
+    {
+        try
+        {
+            return BandcampUrls.Normalize(a) == BandcampUrls.Normalize(b) && !a.Contains('#');
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>ファンのコレクションページ (bandcamp.com/{username}) を解析する。</summary>
+    public static FanPage ParseFanPage(string html)
+    {
+        var doc = Parser.ParseDocument(html);
+        var blob = doc.GetElementById("pagedata")?.GetAttribute("data-blob")
+            ?? throw new BandcampParseException("ファンページのデータが見つかりません。ユーザー名を確認してください。");
+        using var json = JsonDocument.Parse(blob);
+        var root = json.RootElement;
+        var fanData = root.TryGetProperty("fan_data", out var f) ? f : default;
+        var fanId = GetLong(fanData, "fan_id") ?? throw new BandcampParseException("ファン ID が見つかりません。ユーザー名を確認してください。");
+        var collectionData = root.TryGetProperty("collection_data", out var cd) ? cd : default;
+
+        var items = new List<CollectionItem>();
+        if (root.TryGetProperty("item_cache", out var cache) && cache.TryGetProperty("collection", out var coll) && coll.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var p in coll.EnumerateObject())
+            {
+                if (ToCollectionItem(p.Value) is { } item)
+                {
+                    items.Add(item);
+                }
+            }
+        }
+
+        return new FanPage(
+            fanId,
+            (int)(GetLong(collectionData, "item_count") ?? items.Count),
+            GetString(collectionData, "last_token"),
+            items);
+    }
+
+    /// <summary>コレクションの続き (fancollection API の応答) を解析する。</summary>
+    public static (List<CollectionItem> Items, bool MoreAvailable, string? LastToken) ParseCollectionItems(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (GetBool(root, "error") == true)
+        {
+            throw new BandcampParseException(GetString(root, "error_message") ?? "コレクションの取得に失敗しました");
+        }
+
+        var items = new List<CollectionItem>();
+        if (root.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var e in arr.EnumerateArray())
+            {
+                if (ToCollectionItem(e) is { } item)
+                {
+                    items.Add(item);
+                }
+            }
+        }
+
+        return (items, GetBool(root, "more_available") ?? false, GetString(root, "last_token"));
+    }
+
+    private static CollectionItem? ToCollectionItem(JsonElement e)
+    {
+        var id = GetLong(e, "tralbum_id") ?? GetLong(e, "item_id");
+        ItemType? type = GetString(e, "tralbum_type") switch
+        {
+            "a" => ItemType.Album,
+            "t" => ItemType.Track,
+            _ => null,
+        };
+        return id is long i && type is { } t ? new CollectionItem(t, i) : null;
     }
 
     private static SupporterInfo ParseSupporters(IDocument doc)
@@ -110,23 +278,20 @@ public static partial class BandcampParser
         var root = json.RootElement;
         var ids = new List<long>();
         var seen = new HashSet<long>();
-        var lastThumb = CollectFans(root, "thumbs", ids, seen);
-        var lastReview = CollectFans(root, "reviews", ids, seen);
+        CollectFans(root, "thumbs", ids, seen);
+        CollectFans(root, "reviews", ids, seen);
 
         return new SupporterInfo
         {
             FanIds = ids,
             MoreThumbs = GetBool(root, "more_thumbs_available") ?? false,
             MoreReviews = GetBool(root, "more_reviews_available") ?? false,
-            LastThumbToken = lastThumb,
-            LastReviewToken = lastReview,
         };
     }
 
-    /// <summary>thumbs / reviews 配列から fan_id を集め、最後の token を返す。</summary>
-    public static string? CollectFans(JsonElement root, string property, List<long> ids, HashSet<long> seen)
+    /// <summary>thumbs / reviews 配列から fan_id を重複なく集める。</summary>
+    private static void CollectFans(JsonElement root, string property, List<long> ids, HashSet<long> seen)
     {
-        string? lastToken = null;
         if (root.TryGetProperty(property, out var arr) && arr.ValueKind == JsonValueKind.Array)
         {
             foreach (var fan in arr.EnumerateArray())
@@ -135,12 +300,8 @@ public static partial class BandcampParser
                 {
                     ids.Add(fanId);
                 }
-
-                lastToken = GetString(fan, "token") ?? lastToken;
             }
         }
-
-        return lastToken;
     }
 
     /// <summary>アーティスト / レーベルの /music ページを解析する。</summary>
@@ -372,6 +533,11 @@ public static partial class BandcampParser
             _ => null,
         };
     }
+
+    internal static decimal? GetDecimal(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDecimal(out var d)
+            ? d
+            : null;
 
     internal static double? GetDouble(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number

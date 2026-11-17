@@ -11,20 +11,8 @@ chrome.runtime.onInstalled.addListener(() => {
       targetUrlPatterns: BANDCAMP,
     });
     chrome.contextMenus.create({
-      id: "ranking-link",
-      title: "Benrify でサポーター数ランキングを表示",
-      contexts: ["link"],
-      targetUrlPatterns: BANDCAMP,
-    });
-    chrome.contextMenus.create({
       id: "enqueue-page",
       title: "このページを Benrify のキューに追加",
-      contexts: ["page"],
-      documentUrlPatterns: BANDCAMP,
-    });
-    chrome.contextMenus.create({
-      id: "ranking-page",
-      title: "このレーベル / アーティストを Benrify でランキング表示",
       contexts: ["page"],
       documentUrlPatterns: BANDCAMP,
     });
@@ -32,10 +20,9 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const url = info.menuItemId.endsWith("-link") ? info.linkUrl : info.pageUrl;
-  const action = info.menuItemId.startsWith("enqueue") ? "enqueue" : "ranking";
+  const url = info.menuItemId === "enqueue-link" ? info.linkUrl : info.pageUrl;
   try {
-    await send(action, url);
+    await send(url);
     await flash(tab, "OK", "#1DA0C3");
   } catch (e) {
     console.warn(e);

@@ -32,8 +32,78 @@ public sealed record TrackInfo
     /// <summary>mp3-128 のストリームURL。有効期限付きなので再生直前に <see cref="StreamUrls.IsExpired"/> で確認する。</summary>
     public string? StreamUrl { get; init; }
 
+    /// <summary>この曲が収録されているアルバムの ID / URL (単独リリースの曲は null)。</summary>
+    public long? AlbumId { get; init; }
+
+    public string? AlbumUrl { get; init; }
+
     public string ArtUrl => BandcampUrls.ArtUrl(ArtId, ArtSize.Small);
 }
+
+/// <summary>デジタル版の値段。</summary>
+public sealed record PriceInfo
+{
+    private static readonly Dictionary<string, string> Symbols = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["USD"] = "$",
+        ["EUR"] = "€",
+        ["GBP"] = "£",
+        ["JPY"] = "¥",
+        ["CAD"] = "CA$",
+        ["AUD"] = "A$",
+        ["NZD"] = "NZ$",
+    };
+
+    public decimal Amount { get; init; }
+
+    public string Currency { get; init; } = "";
+
+    /// <summary>「またはそれ以上」(金額を上乗せできる) か。</summary>
+    public bool OrMore { get; init; }
+
+    public string Display
+    {
+        get
+        {
+            if (Amount == 0)
+            {
+                return OrMore ? "自由価格" : "無料";
+            }
+
+            var number = Amount.ToString(Amount == decimal.Truncate(Amount) ? "0" : "0.00", System.Globalization.CultureInfo.InvariantCulture);
+            var text = Symbols.TryGetValue(Currency, out var sym) ? sym + number : $"{number} {Currency}".Trim();
+            return OrMore ? text + "+" : text;
+        }
+    }
+}
+
+/// <summary>ファンのコレクション (購入済みの作品)。</summary>
+public sealed record FanCollection
+{
+    public string Username { get; init; } = "";
+    public long FanId { get; init; }
+
+    /// <summary>Bandcamp 上の公開コレクション件数。</summary>
+    public int ItemCount { get; init; }
+
+    public IReadOnlyList<long> AlbumIds { get; init; } = [];
+    public IReadOnlyList<long> TrackIds { get; init; } = [];
+
+    /// <summary>途中で中止した場合、続き (より古い購入) を読み込むためのトークン。全件読み込み済みなら null。</summary>
+    public string? ResumeToken { get; init; }
+
+    public bool Complete => ResumeToken is null;
+
+    public DateTimeOffset FetchedAt { get; init; }
+
+    public int Count => AlbumIds.Count + TrackIds.Count;
+
+    public IEnumerable<CollectionItem> Items() =>
+        AlbumIds.Select(id => new CollectionItem(ItemType.Album, id)).Concat(TrackIds.Select(id => new CollectionItem(ItemType.Track, id)));
+}
+
+/// <summary>コレクション読み込みの進み具合。Partial は途中経過 (購入済みの印を先に付けるため)。</summary>
+public sealed record CollectionProgress(int Loaded, int Total, FanCollection? Partial = null);
 
 /// <summary>ページに埋め込まれている「サポーター」(購入したファン) の情報。</summary>
 public sealed record SupporterInfo
@@ -43,23 +113,16 @@ public sealed record SupporterInfo
 
     public bool MoreThumbs { get; init; }
     public bool MoreReviews { get; init; }
-    public string? LastThumbToken { get; init; }
-    public string? LastReviewToken { get; init; }
 
-    /// <summary>追加ページングで全件数えきれた場合の正確な人数。</summary>
-    public int? ExactCount { get; init; }
+    public int Count => FanIds.Count;
 
-    public int VisibleCount => FanIds.Count;
+    /// <summary>ページに載りきらないサポーターがいる (実際は Count より多い)。</summary>
+    public bool HasMore => MoreThumbs || MoreReviews;
 
-    /// <summary>まだ数えきれていないサポーターがいるか。</summary>
-    public bool HasMore => ExactCount is null && (MoreThumbs || MoreReviews);
-
-    public int BestCount => ExactCount ?? VisibleCount;
-
-    public string Display => HasMore ? $"{BestCount}+" : BestCount.ToString();
+    public string Display => HasMore ? $"{Count}+" : Count.ToString();
 
     /// <summary>ソート用キー。「N+」は N より少し大きいものとして扱う。</summary>
-    public double SortKey => BestCount + (HasMore ? 0.5 : 0);
+    public double SortKey => Count + (HasMore ? 0.5 : 0);
 }
 
 /// <summary>アルバム or 単曲ページの解析結果。</summary>
@@ -74,6 +137,15 @@ public sealed record TralbumPage
     public DateTimeOffset? ReleaseDate { get; init; }
     public IReadOnlyList<TrackInfo> Tracks { get; init; } = [];
     public SupporterInfo Supporters { get; init; } = new();
+
+    /// <summary>デジタル版の値段。単品で買えない曲などは null。</summary>
+    public PriceInfo? Price { get; init; }
+
+    /// <summary>曲ページの場合、収録アルバムの ID / URL。</summary>
+    public long? AlbumId { get; init; }
+
+    public string? AlbumUrl { get; init; }
+
     public DateTimeOffset FetchedAt { get; init; }
 }
 
@@ -97,3 +169,8 @@ public sealed record Discography
 }
 
 public sealed class BandcampParseException(string message) : Exception(message);
+
+public sealed record CollectionItem(ItemType Type, long Id);
+
+/// <summary>ファンページの解析結果。Items は最初の 20 件程度だけで、続きは API で取る。</summary>
+public sealed record FanPage(long FanId, int ItemCount, string? LastToken, IReadOnlyList<CollectionItem> Items);

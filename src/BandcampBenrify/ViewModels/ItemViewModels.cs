@@ -3,11 +3,25 @@ using BandcampBenrify.Infrastructure;
 
 namespace BandcampBenrify.ViewModels;
 
-public sealed class QueueItemViewModel(TrackInfo track) : ObservableObject
+/// <summary>キューの 1 行。サポーター数・値段・購入済みはキャッシュ済みページから計算する。</summary>
+public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObject
 {
+    private static readonly string[] DetailProperties =
+    [
+        nameof(TotalText), nameof(TotalSort), nameof(AlbumSupText), nameof(AlbumSupSort),
+        nameof(TrackSupText), nameof(TrackSupSort), nameof(TrackPriceText), nameof(TrackPriceSort),
+        nameof(AlbumPriceText), nameof(AlbumPriceSort), nameof(ReleaseDate), nameof(ReleaseDateText),
+        nameof(NeedsDetails), nameof(TotalIsPartial),
+    ];
+
     private bool _isPlaying;
+    private TrackDetails _details = new();
+    private PurchaseState _purchase;
 
     public TrackInfo Track { get; } = track;
+
+    /// <summary>キューに追加された順番 (並び替えを戻すときに使う)。</summary>
+    public int Seq { get; } = seq;
 
     public string Title => Track.Title;
 
@@ -17,112 +31,79 @@ public sealed class QueueItemViewModel(TrackInfo track) : ObservableObject
 
     public string Duration => Format.Duration(Track.DurationSeconds);
 
+    public double DurationSeconds => Track.DurationSeconds;
+
     public bool IsPlaying
     {
         get => _isPlaying;
         set => Set(ref _isPlaying, value);
     }
-}
 
-public enum RowState
-{
-    Pending,
-    Loading,
-    Loaded,
-    Counting,
-    Error,
-}
+    public TrackDetails Details => _details;
 
-public sealed class RankingRowViewModel(DiscographyItem item) : ObservableObject
-{
-    private TralbumPage? _page;
-    private RowState _state = RowState.Pending;
-    private string? _error;
-    private int? _rank;
-
-    public DiscographyItem Item { get; } = item;
-
-    public string Title => Item.Title;
-
-    public string Artist => Item.Artist;
-
-    public string TypeLabel => Item.Type == ItemType.Album ? "アルバム" : "曲";
-
-    public string? ArtUrl => string.IsNullOrEmpty(Item.ArtUrl) ? null : Item.ArtUrl;
-
-    public TralbumPage? Page
+    public void Update(TrackDetails details)
     {
-        get => _page;
+        _details = details;
+        foreach (var p in DetailProperties)
+        {
+            OnPropertyChanged(p);
+        }
+    }
+
+    // ---- サポーター ----
+
+    public string TotalText => _details.TotalDisplay;
+
+    public double TotalSort => _details.TotalSortKey;
+
+    /// <summary>曲ページ未取得で合計がアルバム分だけの状態。</summary>
+    public bool TotalIsPartial => _details.HasAnyData && !_details.IsComplete;
+
+    public string AlbumSupText => !_details.HasAlbum ? "—" : _details.AlbumSupporters?.Display ?? "…";
+
+    public double AlbumSupSort => _details.AlbumSupporters?.SortKey ?? -1;
+
+    public string TrackSupText => _details.TrackSupporters?.Display ?? "…";
+
+    public double TrackSupSort => _details.TrackSupporters?.SortKey ?? -1;
+
+    public bool NeedsDetails => !_details.IsComplete;
+
+    // ---- 値段 ----
+
+    public string TrackPriceText => _details.TrackPage is null ? "…" : _details.TrackPrice?.Display ?? "単品なし";
+
+    public double TrackPriceSort => _details.TrackPrice is { } p ? (double)p.Amount : -1;
+
+    public string AlbumPriceText => !_details.HasAlbum ? "—" : _details.AlbumPage is null ? "…" : _details.AlbumPrice?.Display ?? "—";
+
+    public double AlbumPriceSort => _details.AlbumPrice is { } p ? (double)p.Amount : -1;
+
+    public DateTimeOffset? ReleaseDate => _details.AlbumPage?.ReleaseDate ?? _details.TrackPage?.ReleaseDate;
+
+    public string ReleaseDateText => ReleaseDate?.ToLocalTime().ToString("yyyy-MM-dd") ?? "";
+
+    // ---- 購入済み ----
+
+    public PurchaseState Purchase
+    {
+        get => _purchase;
         set
         {
-            if (Set(ref _page, value))
+            if (Set(ref _purchase, value))
             {
-                OnPropertyChanged(nameof(Supporters));
-                OnPropertyChanged(nameof(SortKey));
-                OnPropertyChanged(nameof(ReleaseDate));
-                OnPropertyChanged(nameof(ReleaseDateText));
-                OnPropertyChanged(nameof(TrackCount));
-                OnPropertyChanged(nameof(HasMoreSupporters));
-                OnPropertyChanged(nameof(HasAudio));
-                OnPropertyChanged(nameof(StateText));
+                OnPropertyChanged(nameof(PurchaseText));
+                OnPropertyChanged(nameof(IsPurchased));
             }
         }
     }
 
-    /// <summary>サポーター数での順位 (同数は同順位)。未取得は null。</summary>
-    public int? Rank
+    public bool IsPurchased => Purchase != PurchaseState.None;
+
+    public string PurchaseText => Purchase switch
     {
-        get => _rank;
-        set => Set(ref _rank, value);
-    }
-
-    /// <summary>試聴できる曲が 1 曲以上あるか。</summary>
-    public bool HasAudio => Page?.Tracks.Any(t => t.StreamUrl is not null) ?? false;
-
-    public RowState State
-    {
-        get => _state;
-        set
-        {
-            if (Set(ref _state, value))
-            {
-                OnPropertyChanged(nameof(StateText));
-            }
-        }
-    }
-
-    public string? Error
-    {
-        get => _error;
-        set
-        {
-            if (Set(ref _error, value))
-            {
-                OnPropertyChanged(nameof(StateText));
-            }
-        }
-    }
-
-    public string Supporters => Page?.Supporters.Display ?? "…";
-
-    /// <summary>未取得は -1。「N+」は N.5 として扱う。</summary>
-    public double SortKey => Page?.Supporters.SortKey ?? -1;
-
-    public bool HasMoreSupporters => Page?.Supporters.HasMore ?? false;
-
-    public DateTimeOffset? ReleaseDate => Page?.ReleaseDate;
-
-    public string ReleaseDateText => Page?.ReleaseDate?.ToLocalTime().ToString("yyyy-MM-dd") ?? "";
-
-    public int? TrackCount => Page?.Tracks.Count;
-
-    public string StateText => State switch
-    {
-        RowState.Pending => "待機",
-        RowState.Loading => "取得中",
-        RowState.Counting => "集計中",
-        RowState.Error => "エラー: " + Error,
-        _ when Page is not null && !HasAudio => "試聴不可",
+        PurchaseState.Album => "✓ アルバム",
+        PurchaseState.Track => "✓ 曲",
         _ => "",
     };
 }
@@ -139,4 +120,7 @@ public static class Format
         var t = TimeSpan.FromSeconds(seconds);
         return t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"m\:ss");
     }
+
+    public static string Eta(TimeSpan t) =>
+        t.TotalMinutes >= 1 ? $"{Math.Ceiling(t.TotalMinutes)} 分" : $"{Math.Ceiling(t.TotalSeconds)} 秒";
 }

@@ -11,11 +11,11 @@ export async function ping() {
   }
 }
 
-/** @param {"enqueue" | "ranking"} action */
-export async function send(action, url) {
+/** URL をアプリのキューに送る */
+export async function send(url) {
   let res;
   try {
-    res = await fetch(`${API_BASE}/${action}`, {
+    res = await fetch(`${API_BASE}/enqueue`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Benrify": "1" },
       body: JSON.stringify({ url }),

@@ -1,14 +1,19 @@
-﻿using System.Windows;
+using System.ComponentModel;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using BandcampBenrify.Infrastructure;
 using BandcampBenrify.ViewModels;
 
 namespace BandcampBenrify;
 
 public partial class MainWindow : Window
 {
+    // 数値の列は最初のクリックで「多い順 / 新しい順」にする
+    private static readonly HashSet<string> DescendingFirst = ["TotalSort", "AlbumSupSort", "TrackSupSort", "ReleaseDate"];
+
     public MainWindow()
     {
         InitializeComponent();
@@ -16,19 +21,87 @@ public partial class MainWindow : Window
         {
             if (e.NewValue is MainViewModel vm)
             {
+                ApplySavedBounds(vm.Settings.Window);
                 vm.PropertyChanged += (_, args) =>
                 {
                     // 再生中の曲が見えるようにスクロールする
                     if (args.PropertyName == nameof(MainViewModel.Current) && vm.Current is { } current)
                     {
-                        QueueList.ScrollIntoView(current);
+                        QueueGrid.ScrollIntoView(current);
                     }
                 };
+            }
+        };
+        Closing += (_, _) =>
+        {
+            if (Vm is { } vm)
+            {
+                var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+                vm.Settings.Window = new WindowBounds(r.Left, r.Top, r.Width, r.Height, WindowState == WindowState.Maximized);
             }
         };
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
+
+    /// <summary>前回の位置とサイズ。初回は画面 (作業領域) の 9 割の大きさで中央に置く。</summary>
+    private void ApplySavedBounds(WindowBounds? saved)
+    {
+        var area = SystemParameters.WorkArea;
+        if (saved is not null && saved.Width >= MinWidth && saved.Height >= MinHeight
+            && saved.Left < area.Right - 100 && saved.Top < area.Bottom - 100 && saved.Left + saved.Width > area.Left + 100 && saved.Top >= area.Top - 20)
+        {
+            Left = saved.Left;
+            Top = saved.Top;
+            Width = saved.Width;
+            Height = saved.Height;
+            if (saved.Maximized)
+            {
+                WindowState = WindowState.Maximized;
+            }
+
+            return;
+        }
+
+        Width = Math.Max(MinWidth, area.Width * 0.9);
+        Height = Math.Max(MinHeight, area.Height * 0.9);
+        Left = area.Left + (area.Width - Width) / 2;
+        Top = area.Top + (area.Height - Height) / 2;
+    }
+
+    private void QueueGrid_Sorting(object sender, DataGridSortingEventArgs e)
+    {
+        if (e.Column.SortDirection is null && DescendingFirst.Contains(e.Column.SortMemberPath))
+        {
+            e.Handled = true;
+            var view = QueueGrid.Items;
+            view.SortDescriptions.Clear();
+            view.SortDescriptions.Add(new SortDescription(e.Column.SortMemberPath, ListSortDirection.Descending));
+            foreach (var c in QueueGrid.Columns)
+            {
+                c.SortDirection = null;
+            }
+
+            e.Column.SortDirection = ListSortDirection.Descending;
+        }
+    }
+
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm)
+        {
+            new SettingsWindow(vm) { Owner = this }.ShowDialog();
+        }
+    }
+
+    private void ResetSort_Click(object sender, RoutedEventArgs e)
+    {
+        QueueGrid.Items.SortDescriptions.Clear();
+        foreach (var c in QueueGrid.Columns)
+        {
+            c.SortDirection = null;
+        }
+    }
 
     private void SeekBar_DragStarted(object sender, DragStartedEventArgs e)
     {
@@ -56,25 +129,12 @@ public partial class MainWindow : Window
         }
     }
 
-    private void QueueList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    private void QueueGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        if (FindAncestor<ListViewItem>(e.OriginalSource as DependencyObject)?.DataContext is QueueItemViewModel item
+        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject)?.DataContext is QueueItemViewModel item
             && Vm?.PlayItemCommand.CanExecute(item) == true)
         {
             Vm.PlayItemCommand.Execute(item);
-        }
-    }
-
-    private void RankingGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (FindAncestor<DataGridRow>(e.OriginalSource as DependencyObject)?.DataContext is RankingRowViewModel row
-            && Vm?.Ranking.AddSelectedCommand is { } cmd)
-        {
-            var param = new List<RankingRowViewModel> { row };
-            if (cmd.CanExecute(param))
-            {
-                cmd.Execute(param);
-            }
         }
     }
 

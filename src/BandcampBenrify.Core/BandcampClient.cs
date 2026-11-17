@@ -11,13 +11,18 @@ public sealed record ResolveProgress(int Done, int Total, string? Current, strin
 /// </summary>
 public sealed class BandcampClient
 {
-    private const string TralbumNs = "tralbum";
+    // 保存形式を変えたら名前を変える (古いキャッシュは使わずに取り直す)
+    private const string TralbumNs = "tralbum-v2";
     private const string DiscographyNs = "discography";
+    private const string CollectionNs = "collection";
 
     private readonly ThrottledHttpClient _http;
     private readonly DiskCache _cache;
     private readonly Func<DateTimeOffset> _now;
     private readonly ConcurrentDictionary<string, Lazy<Task<TralbumPage>>> _inflight = new();
+
+    // ディスクキャッシュの前に置くメモリキャッシュ (キューの各曲から同じアルバムページを何度も引くため)
+    private readonly ConcurrentDictionary<string, CacheEntry<TralbumPage>?> _memory = new();
 
     public BandcampClient(ThrottledHttpClient http, DiskCache cache, Func<DateTimeOffset>? now = null)
     {
@@ -26,32 +31,32 @@ public sealed class BandcampClient
         _now = now ?? (() => DateTimeOffset.UtcNow);
     }
 
-    /// <summary>アルバム / 曲ページのキャッシュ有効期間 (サポーター数・曲目)。</summary>
+    /// <summary>アルバム / 曲ページのキャッシュ有効期間 (サポーター数・曲目・値段)。</summary>
     public TimeSpan TralbumTtl { get; set; } = TimeSpan.FromDays(3);
 
     /// <summary>作品一覧ページのキャッシュ有効期間。</summary>
     public TimeSpan DiscographyTtl { get; set; } = TimeSpan.FromHours(12);
 
-    /// <summary>正確なサポーター数を数えるとき、1 作品あたりに追加で送るリクエストの上限。</summary>
-    public int ExactCountMaxRequestsPerItem { get; set; } = 30;
-
-    /// <summary>正確なサポーター数を数えるときの 1 リクエストあたりの取得件数。</summary>
-    public int ExactCountPageSize { get; set; } = 100;
-
-    public TralbumPage? TryGetCachedTralbum(string url) =>
-        _cache.TryGet<TralbumPage>(TralbumNs, BandcampUrls.Normalize(url))?.Value;
+    /// <summary>キャッシュ済みのページ (期限切れでも返す)。リクエストは送らない。</summary>
+    public TralbumPage? TryGetCachedTralbum(string url) => GetEntry(url)?.Value;
 
     /// <summary>有効期限内のキャッシュがあれば返す (リクエストは送らない)。</summary>
     public TralbumPage? TryGetFreshTralbum(string url) =>
-        _cache.TryGetFresh<TralbumPage>(TralbumNs, BandcampUrls.Normalize(url), TralbumTtl, _now());
+        GetEntry(url) is { } e && _now() - e.SavedAt <= TralbumTtl ? e.Value : null;
 
     /// <summary>リクエスト 1 件あたりの目安時間 (残り時間の見積もり用)。</summary>
     public TimeSpan EstimatedTimePerRequest => _http.MinInterval + TimeSpan.FromSeconds(0.5);
 
+    private CacheEntry<TralbumPage>? GetEntry(string url)
+    {
+        var key = BandcampUrls.Normalize(url);
+        return _memory.GetOrAdd(key, k => _cache.TryGet<TralbumPage>(TralbumNs, k));
+    }
+
     public async Task<TralbumPage> GetTralbumAsync(string url, RequestPriority priority, bool forceRefresh = false, CancellationToken ct = default)
     {
         url = BandcampUrls.Normalize(url);
-        if (!forceRefresh && _cache.TryGetFresh<TralbumPage>(TralbumNs, url, TralbumTtl, _now()) is { } cached)
+        if (!forceRefresh && TryGetFreshTralbum(url) is { } cached)
         {
             return cached;
         }
@@ -78,14 +83,6 @@ public sealed class BandcampClient
     {
         var result = await _http.GetAsync(url, priority, ct).ConfigureAwait(false);
         var page = BandcampParser.ParseTralbum(result.Body, result.FinalUri.ToString(), _now());
-
-        // 以前に数えた正確なサポーター数は、ページ再取得で失わないよう引き継ぐ
-        var previous = _cache.TryGet<TralbumPage>(TralbumNs, url)?.Value;
-        if (previous?.Supporters.ExactCount is int exact && page.Supporters.HasMore && exact >= page.Supporters.VisibleCount)
-        {
-            page = page with { Supporters = page.Supporters with { ExactCount = exact } };
-        }
-
         Store(url, page);
         return page;
     }
@@ -93,11 +90,14 @@ public sealed class BandcampClient
     private void Store(string requestedUrl, TralbumPage page)
     {
         var now = _now();
+        var entry = new CacheEntry<TralbumPage>(requestedUrl, now, page);
         _cache.Set(TralbumNs, requestedUrl, page, now);
+        _memory[requestedUrl] = entry;
         var canonical = BandcampUrls.Normalize(page.Url);
         if (canonical != requestedUrl)
         {
             _cache.Set(TralbumNs, canonical, page, now);
+            _memory[canonical] = entry with { Key = canonical };
         }
     }
 
@@ -164,7 +164,7 @@ public sealed class BandcampClient
         {
             progress?.Report(new ResolveProgress(0, 1, url));
             var page = await GetTralbumAsync(url, RequestPriority.Interactive, ct: ct).ConfigureAwait(false);
-            progress?.Report(new ResolveProgress(1, 1, page.Title));
+            progress?.Report(new ResolveProgress(1, 1, page.Title, NoAudio: !page.Tracks.Any(t => t.StreamUrl is not null)));
             foreach (var t in page.Tracks.Where(t => t.StreamUrl is not null))
             {
                 yield return t;
@@ -223,74 +223,106 @@ public sealed class BandcampClient
         return expired ? null : stream;
     }
 
+    // ---- コレクション ----
+
+    public FanCollection? TryGetCachedCollection(string username) =>
+        BandcampUrls.ParseFanUsername(username) is { } u ? _cache.TryGet<FanCollection>(CollectionNs, u.ToLowerInvariant())?.Value : null;
+
     /// <summary>
-    /// ページに載りきらないサポーターを Bandcamp の「もっと見る」と同じ API でページングして数える。
-    /// 1 作品あたり最大 <see cref="ExactCountMaxRequestsPerItem"/> 回まで。数えきれなければ「N+」のまま返す。
+    /// ファンの公開コレクションを読み込む。Bandcamp の API は 1 回 20 件ずつしか返さないので、
+    /// 初回は件数 / 20 回のリクエストが必要 (中止しても途中まで保存し、次回は続きから読み込む)。
+    /// 2 回目以降は新しく買った分だけを読む (通常はファンページ 1 回で済む)。
     /// </summary>
-    public async Task<TralbumPage> CountSupportersAsync(TralbumPage page, CancellationToken ct = default)
+    public async Task<FanCollection> GetCollectionAsync(string username, IProgress<CollectionProgress>? progress = null, CancellationToken ct = default)
     {
-        var s = page.Supporters;
-        if (!s.HasMore)
+        username = BandcampUrls.ParseFanUsername(username)
+            ?? throw new ArgumentException("設定で Bandcamp のプロフィール (https://bandcamp.com/ユーザー名) を入力してください。");
+        var key = username.ToLowerInvariant();
+        var existing = _cache.TryGet<FanCollection>(CollectionNs, key)?.Value;
+
+        var result = await _http.GetAsync($"https://bandcamp.com/{username}", RequestPriority.Interactive, ct).ConfigureAwait(false);
+        var fan = BandcampParser.ParseFanPage(result.Body);
+        if (existing is not null && existing.FanId != fan.FanId)
         {
-            return page;
+            existing = null;
         }
 
-        var origin = BandcampUrls.Origin(page.Url);
-        var ids = new List<long>(s.FanIds);
-        var seen = new HashSet<long>(s.FanIds);
-        var budget = ExactCountMaxRequestsPerItem;
+        var known = new HashSet<CollectionItem>(existing?.Items() ?? []);
+        var items = new HashSet<CollectionItem>(known);
+        items.UnionWith(fan.Items);
+        progress?.Report(new CollectionProgress(items.Count, fan.ItemCount));
 
-        var thumbsDone = await PageAsync("thumbs", s.MoreThumbs, s.LastThumbToken).ConfigureAwait(false);
-        var reviewsDone = await PageAsync("reviews", s.MoreReviews, s.LastReviewToken).ConfigureAwait(false);
-
-        var updated = page with
+        // 1) 前回以降に買った分: 既知の作品に行き当たるまで新しい順に読む
+        if (existing is not null && fan.Items.Count > 0 && !fan.Items.Any(known.Contains))
         {
-            Supporters = s with
+            var token = fan.LastToken;
+            while (token is not null)
             {
-                FanIds = ids,
-                MoreThumbs = !thumbsDone,
-                MoreReviews = !reviewsDone,
-                ExactCount = thumbsDone && reviewsDone ? ids.Count : null,
-            },
-        };
-        Store(BandcampUrls.Normalize(page.Url), updated);
-        return updated;
+                var (batch, more, next) = await FetchCollectionBatchAsync(fan.FanId, token, ct).ConfigureAwait(false);
+                items.UnionWith(batch);
+                progress?.Report(new CollectionProgress(items.Count, fan.ItemCount));
+                token = more && batch.Count > 0 && !batch.Any(known.Contains) ? next : null;
+            }
+        }
 
-        async Task<bool> PageAsync(string kind, bool more, string? token)
+        // 2) 古い分: 初回はファンページの続きから、前回中止していればその続きから
+        var resume = existing is null ? fan.LastToken : existing.ResumeToken;
+        if (fan.ItemCount <= items.Count)
         {
-            while (more)
+            resume = null;
+        }
+
+        var requests = 0;
+        try
+        {
+            while (resume is not null)
             {
-                if (token is null || budget <= 0)
+                var (batch, more, next) = await FetchCollectionBatchAsync(fan.FanId, resume, ct).ConfigureAwait(false);
+                items.UnionWith(batch);
+                resume = more && batch.Count > 0 ? next : null;
+                if (++requests % 10 == 0)
                 {
-                    return false;
+                    // 途中経過を保存 (中止・異常終了しても続きから読める) し、先に印を付けられるよう通知
+                    var partial = BuildCollection(username, fan, items, resume);
+                    _cache.Set(CollectionNs, key, partial, partial.FetchedAt);
+                    progress?.Report(new CollectionProgress(items.Count, fan.ItemCount, partial));
                 }
-
-                budget--;
-                var body = JsonSerializer.Serialize(new
+                else
                 {
-                    tralbum_type = page.Type == ItemType.Album ? "a" : "t",
-                    tralbum_id = page.Id,
-                    token,
-                    count = ExactCountPageSize,
-                });
-                var result = await _http.PostJsonAsync($"{origin}/api/tralbumcollectors/2/{kind}", body, RequestPriority.Background, ct).ConfigureAwait(false);
-                using var json = JsonDocument.Parse(result.Body);
-                var root = json.RootElement;
-                if (BandcampParser.GetBool(root, "error") == true)
-                {
-                    throw new HttpRequestException(BandcampParser.GetString(root, "error_message") ?? "Bandcamp API がエラーを返しました");
-                }
-
-                var before = ids.Count;
-                token = BandcampParser.CollectFans(root, "results", ids, seen);
-                more = BandcampParser.GetBool(root, "more_available") ?? false;
-                if (ids.Count == before && more)
-                {
-                    return false; // 進まないなら打ち切る
+                    progress?.Report(new CollectionProgress(items.Count, fan.ItemCount));
                 }
             }
-
-            return true;
         }
+        catch (OperationCanceledException)
+        {
+            var partial = BuildCollection(username, fan, items, resume);
+            _cache.Set(CollectionNs, key, partial, partial.FetchedAt);
+            throw;
+        }
+
+        var collection = BuildCollection(username, fan, items, resumeToken: null);
+        _cache.Set(CollectionNs, key, collection, collection.FetchedAt);
+        return collection;
     }
+
+    private FanCollection BuildCollection(string username, FanPage fan, HashSet<CollectionItem> items, string? resumeToken) => new()
+    {
+        Username = username,
+        FanId = fan.FanId,
+        ItemCount = fan.ItemCount,
+        AlbumIds = items.Where(i => i.Type == ItemType.Album).Select(i => i.Id).ToList(),
+        TrackIds = items.Where(i => i.Type == ItemType.Track).Select(i => i.Id).ToList(),
+        ResumeToken = resumeToken,
+        FetchedAt = _now(),
+    };
+
+    private async Task<(List<CollectionItem> Items, bool More, string? Next)> FetchCollectionBatchAsync(long fanId, string token, CancellationToken ct)
+    {
+        var body = JsonSerializer.Serialize(new { fan_id = fanId, older_than_token = token, count = 20 });
+        var page = await _http.PostJsonAsync("https://bandcamp.com/api/fancollection/1/collection_items", body, RequestPriority.Background, ct).ConfigureAwait(false);
+        return BandcampParser.ParseCollectionItems(page.Body);
+    }
+
+    /// <summary>コレクション 1 リクエストあたりの件数 (Bandcamp 側の上限)。</summary>
+    public const int CollectionBatchSize = 20;
 }

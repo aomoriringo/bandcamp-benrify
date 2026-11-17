@@ -16,14 +16,12 @@ public sealed class LocalApiServer : IDisposable
 
     private readonly HttpListener _listener = new();
     private readonly Func<string, Task> _enqueue;
-    private readonly Func<string, Task> _ranking;
     private readonly CancellationTokenSource _cts = new();
 
-    public LocalApiServer(int port, Func<string, Task> enqueue, Func<string, Task> ranking)
+    public LocalApiServer(int port, Func<string, Task> enqueue)
     {
         Port = port;
         _enqueue = enqueue;
-        _ranking = ranking;
         _listener.Prefixes.Add($"http://localhost:{port}/");
     }
 
@@ -70,7 +68,7 @@ public sealed class LocalApiServer : IDisposable
                 return;
             }
 
-            if (req.HttpMethod != "POST" || (path != "/enqueue" && path != "/ranking"))
+            if (req.HttpMethod != "POST" || path != "/enqueue")
             {
                 await WriteAsync(res, 404, new { ok = false, error = "not found" });
                 return;
@@ -93,7 +91,7 @@ public sealed class LocalApiServer : IDisposable
                 return;
             }
 
-            await (path == "/enqueue" ? _enqueue(url) : _ranking(url));
+            await _enqueue(url);
             await WriteAsync(res, 202, new { ok = true });
         }
         catch (Exception ex)

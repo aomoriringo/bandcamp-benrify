@@ -3,31 +3,55 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:BandcampBenrify.ViewModels"
         Title="{Binding WindowTitle}"
-        Width="1100" Height="720" MinWidth="720" MinHeight="480"
+        Width="1600" Height="960" MinWidth="960" MinHeight="560"
         FontFamily="Yu Gothic UI, Segoe UI" FontSize="13"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="Manual">
     <Window.InputBindings>
         <KeyBinding Key="Space" Modifiers="Ctrl" Command="{Binding PlayPauseCommand}" />
         <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding NextCommand}" />
         <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding PreviousCommand}" />
     </Window.InputBindings>
 
+    <Window.Resources>
+        <Style x:Key="NumCell" TargetType="TextBlock" BasedOn="{StaticResource CellText}">
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="Margin" Value="4,0,10,0" />
+        </Style>
+        <Style x:Key="TotalCell" TargetType="TextBlock" BasedOn="{StaticResource NumCell}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding TotalIsPartial}" Value="True">
+                    <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+                    <Setter Property="FontWeight" Value="Normal" />
+                    <Setter Property="ToolTip" Value="曲単体のサポーター数が未取得のため、アルバム分だけの数です" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="PurchaseCell" TargetType="TextBlock" BasedOn="{StaticResource CellText}">
+            <Setter Property="Foreground" Value="#1F7A3F" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style x:Key="SortableHeader" TargetType="{x:Type DataGridColumnHeader}">
+            <Setter Property="HorizontalContentAlignment" Value="Left" />
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+    </Window.Resources>
+
     <DockPanel>
         <!-- URL 入力 -->
-        <Grid DockPanel.Dock="Top" Margin="10,10,10,6">
+        <Grid DockPanel.Dock="Top" Margin="12,12,12,6">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid>
                 <TextBox x:Name="UrlBox" Text="{Binding InputUrl, UpdateSourceTrigger=PropertyChanged}"
-                         VerticalContentAlignment="Center" Padding="6,4">
+                         VerticalContentAlignment="Center" Padding="6,5" FontSize="14">
                     <TextBox.InputBindings>
                         <KeyBinding Key="Enter" Command="{Binding AddUrlCommand}" />
                     </TextBox.InputBindings>
                 </TextBox>
-                <TextBlock Text="Bandcamp の曲 / アルバム / レーベル・アーティストの URL" Margin="9,0,0,0"
+                <TextBlock Text="Bandcamp の URL を貼り付けて Enter — 曲 → その曲 / アルバム → 全曲 / レーベル・アーティスト → 全作品の全曲" Margin="9,0,0,0"
                            VerticalAlignment="Center" Foreground="{StaticResource MutedText}" IsHitTestVisible="False">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -41,11 +65,31 @@
                     </TextBlock.Style>
                 </TextBlock>
             </Grid>
-            <Button Grid.Column="1" Content="キューに追加" Command="{Binding AddUrlCommand}"
-                    ToolTip="曲ならその曲、アルバムなら全曲、レーベル / アーティストなら全作品の全曲を追加 (Enter)" />
-            <Button Grid.Column="2" Content="サポーター数ランキング" Command="{Binding ShowRankingCommand}"
-                    ToolTip="レーベル / アーティストの作品をサポーター (購入者) の多い順に表示" />
+            <Button Grid.Column="1" Content="キューに追加" Command="{Binding AddUrlCommand}" Padding="18,6" />
         </Grid>
+
+        <!-- キューの操作 -->
+        <DockPanel DockPanel.Dock="Top" Margin="12,0,12,6" LastChildFill="False">
+            <Button x:Name="FetchDetailsButton" Content="{Binding DetailsButtonText}" Margin="0"
+                    Command="{Binding FetchDetailsCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}"
+                    ToolTip="曲ページを取得して、曲単体のサポーター数と値段を調べます (1 曲 1 リクエスト)。&#10;曲を選択していれば選択した曲だけ、していなければ表示中の曲を上から順に取得します。" />
+            <CheckBox x:Name="HidePurchasedCheck" Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="16,0,0,0"
+                      ToolTip="購入済みの曲を一覧と再生対象から外します (コレクションの読み込みが必要)" />
+            <Button x:Name="ResetSortButton" Content="追加順に戻す" Click="ResetSort_Click" ToolTip="列の並び替えを解除して、キューに追加した順に戻します" Margin="12,0,0,0" />
+            <TextBlock Text="{Binding QueueSummary}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{StaticResource MutedText}" />
+
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <TextBlock Text="{Binding CollectionStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" />
+                <Button x:Name="RefreshCollectionButton" Content="コレクション更新" Command="{Binding RefreshCollectionCommand}" Margin="8,0,0,0"
+                        ToolTip="Bandcamp の公開コレクションを読み込み直して、購入済みの印を更新します" />
+                <Button x:Name="SettingsButton" Click="Settings_Click" Margin="6,0,0,0" ToolTip="設定 (プロフィール・リクエスト間隔・キャッシュ)">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE713;" VerticalAlignment="Center" Margin="0,0,6,0" />
+                        <TextBlock Text="設定" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </DockPanel>
 
         <!-- ステータスバー -->
         <StatusBar DockPanel.Dock="Bottom">
@@ -58,37 +102,42 @@
         </StatusBar>
 
         <!-- プレイヤー -->
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource PlayerBackground}" BorderBrush="#DDE2E6" BorderThickness="0,1,0,0" Padding="10,8">
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PlayerBackground}" BorderBrush="#DDE2E6" BorderThickness="0,1,0,0" Padding="12,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="260" />
+                    <ColumnDefinition Width="2*" MinWidth="280" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="3*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Border Width="64" Height="64" Background="#DDE2E6" CornerRadius="3" ClipToBounds="True">
+                <Border Width="80" Height="80" Background="#DDE2E6" CornerRadius="3" ClipToBounds="True">
                     <Image Source="{Binding NowArtUrl, TargetNullValue={x:Null}}" Stretch="UniformToFill" />
                 </Border>
 
-                <StackPanel Grid.Column="1" Margin="10,0" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding NowTitle}" FontWeight="SemiBold" FontSize="14" TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Column="1" Margin="12,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding NowTitle}" FontWeight="SemiBold" FontSize="16" TextTrimming="CharacterEllipsis" />
                     <TextBlock Text="{Binding NowSubtitle}" Foreground="{StaticResource MutedText}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding NowStats}" Foreground="{StaticResource MutedText}" FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
                     <TextBlock Margin="0,2,0,0" Visibility="{Binding HasCurrent, Converter={StaticResource BoolToVis}}">
                         <Hyperlink Command="{Binding OpenInBrowserCommand}">Bandcamp で開く</Hyperlink>
                     </TextBlock>
                 </StackPanel>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <ToggleButton x:Name="ShuffleToggle" AutomationProperties.Name="ランダム再生" Style="{StaticResource IconToggle}" Content="&#xE8B1;" IsChecked="{Binding Shuffle}" ToolTip="ランダム再生 (オン: キュー全体からランダム / オフ: 上から順番)" />
-                    <Button x:Name="PrevButton" AutomationProperties.Name="前へ" Style="{StaticResource IconButton}" Content="&#xE892;" Command="{Binding PreviousCommand}" ToolTip="前へ (Ctrl+←)" />
-                    <Button x:Name="PlayButton" AutomationProperties.Name="再生 / 一時停止" Style="{StaticResource IconButton}" Content="{Binding PlayPauseGlyph}" FontSize="22" Width="48"
-                            Command="{Binding PlayPauseCommand}" ToolTip="再生 / 一時停止 (Ctrl+Space)" />
-                    <Button x:Name="NextButton" AutomationProperties.Name="次へ" Style="{StaticResource IconButton}" Content="&#xE893;" Command="{Binding NextCommand}" ToolTip="次へ (Ctrl+→)" />
+                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal">
+                        <ToggleButton x:Name="ShuffleToggle" AutomationProperties.Name="ランダム再生" Style="{StaticResource IconToggle}" Content="&#xE8B1;" IsChecked="{Binding Shuffle}"
+                                      ToolTip="オン: キュー全体からランダム / オフ: 表示の順番 (並び替えた順) に上から再生" />
+                        <Button x:Name="PrevButton" AutomationProperties.Name="前へ" Style="{StaticResource IconButton}" Content="&#xE892;" Command="{Binding PreviousCommand}" ToolTip="前へ (Ctrl+←)" />
+                        <Button x:Name="PlayButton" AutomationProperties.Name="再生 / 一時停止" Style="{StaticResource IconButton}" Content="{Binding PlayPauseGlyph}" FontSize="24" Width="52"
+                                Command="{Binding PlayPauseCommand}" ToolTip="再生 / 一時停止 (Ctrl+Space)" />
+                        <Button x:Name="NextButton" AutomationProperties.Name="次へ" Style="{StaticResource IconButton}" Content="&#xE893;" Command="{Binding NextCommand}" ToolTip="次へ (Ctrl+→)" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding PlayModeText}" HorizontalAlignment="Center" FontSize="11" Foreground="{StaticResource MutedText}" />
                 </StackPanel>
 
-                <Grid Grid.Column="3" VerticalAlignment="Center" Margin="12,0">
+                <Grid Grid.Column="3" VerticalAlignment="Center" Margin="16,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -106,168 +155,110 @@
 
                 <StackPanel Grid.Column="4" Orientation="Horizontal" VerticalAlignment="Center">
                     <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE767;" VerticalAlignment="Center" Margin="0,0,6,0" />
-                    <Slider x:Name="VolumeSlider" AutomationProperties.Name="音量" Width="100" Minimum="0" Maximum="1" Value="{Binding Volume}" VerticalAlignment="Center" ToolTip="音量" />
+                    <Slider x:Name="VolumeSlider" AutomationProperties.Name="音量" Width="120" Minimum="0" Maximum="1" Value="{Binding Volume}" VerticalAlignment="Center" ToolTip="音量" />
                 </StackPanel>
             </Grid>
         </Border>
 
         <!-- バックグラウンド処理の進捗 -->
-        <Border DockPanel.Dock="Bottom" Background="#FFF8E1" Padding="10,4"
+        <Border DockPanel.Dock="Bottom" Background="#FFF8E1" Padding="12,5"
                 Visibility="{Binding HasJobs, Converter={StaticResource BoolToVis}}">
             <DockPanel>
-                <Button DockPanel.Dock="Right" Content="中止" Command="{Binding CancelJobsCommand}" Padding="10,1" />
+                <Button DockPanel.Dock="Right" Content="中止" Command="{Binding CancelJobsCommand}" Padding="12,1" />
+                <ProgressBar DockPanel.Dock="Right" Width="200" Height="10" Margin="12,0" Maximum="1"
+                             Value="{Binding JobProgress, Mode=OneWay}" IsIndeterminate="{Binding JobProgressIndeterminate, Mode=OneWay}" />
                 <TextBlock Text="{Binding JobText}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             </DockPanel>
         </Border>
 
-        <TabControl SelectedIndex="{Binding SelectedTab}" Margin="10,0,10,8">
-            <!-- キュー -->
-            <TabItem Header="{Binding QueueHeader}">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,6,0,6">
-                        <Button Content="選択を削除" Margin="0"
-                                Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueList}" />
-                        <Button Content="すべて削除" Command="{Binding ClearQueueCommand}" />
-                        <TextBlock Text="ダブルクリックで再生 / Delete キーで削除" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" />
-                    </StackPanel>
-                    <Grid>
-                    <ListView x:Name="QueueList" ItemsSource="{Binding Queue}" SelectionMode="Extended"
-                              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                              MouseDoubleClick="QueueList_MouseDoubleClick">
-                        <ListView.InputBindings>
-                            <KeyBinding Key="Delete" Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueList}" />
-                        </ListView.InputBindings>
-                        <ListView.ItemContainerStyle>
-                            <Style TargetType="ListViewItem">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsPlaying}" Value="True">
-                                        <Setter Property="FontWeight" Value="Bold" />
-                                        <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ListView.ItemContainerStyle>
-                        <ListView.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="再生" Command="{Binding PlacementTarget.DataContext.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                <MenuItem Header="Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                <MenuItem Header="削除" Command="{Binding PlacementTarget.DataContext.RemoveSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                            </ContextMenu>
-                        </ListView.ContextMenu>
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Width="28">
-                                    <GridViewColumn.CellTemplate>
-                                        <DataTemplate DataType="vm:QueueItemViewModel">
-                                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;"
-                                                       Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVis}}" />
-                                        </DataTemplate>
-                                    </GridViewColumn.CellTemplate>
-                                </GridViewColumn>
-                                <GridViewColumn Header="タイトル" Width="320" DisplayMemberBinding="{Binding Title}" />
-                                <GridViewColumn Header="アーティスト" Width="200" DisplayMemberBinding="{Binding Artist}" />
-                                <GridViewColumn Header="アルバム" Width="260" DisplayMemberBinding="{Binding Album}" />
-                                <GridViewColumn Header="長さ" Width="64" DisplayMemberBinding="{Binding Duration}" />
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
-                                Visibility="{Binding IsQueueEmpty, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="キューは空です" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource MutedText}" />
-                        <TextBlock Margin="0,8,0,0" Foreground="{StaticResource MutedText}" TextAlignment="Center" LineHeight="22">
-                            上の欄に Bandcamp の URL を貼り付けて Enter<LineBreak />
-                            曲 → その曲 / アルバム → 全曲 / レーベル・アーティスト → 全作品の全曲
-                        </TextBlock>
-                    </StackPanel>
-                    </Grid>
-                </DockPanel>
-            </TabItem>
+        <!-- キュー -->
+        <Grid Margin="12,0,12,8">
+            <DataGrid x:Name="QueueGrid" ItemsSource="{Binding QueueView}" AutoGenerateColumns="False" IsReadOnly="True"
+                      SelectionMode="Extended" SelectionUnit="FullRow" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      HorizontalGridLinesBrush="#EEF0F2" RowHeight="30" CanUserReorderColumns="True" CanUserResizeColumns="True"
+                      EnableRowVirtualization="True" EnableColumnVirtualization="True"
+                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                      ColumnHeaderStyle="{StaticResource SortableHeader}"
+                      Sorting="QueueGrid_Sorting" MouseDoubleClick="QueueGrid_MouseDoubleClick">
+                <DataGrid.InputBindings>
+                    <KeyBinding Key="Delete" Command="{Binding RemoveSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}" />
+                    <KeyBinding Key="Enter" Command="{Binding PlayItemCommand}" CommandParameter="{Binding SelectedItem, ElementName=QueueGrid}" />
+                </DataGrid.InputBindings>
+                <DataGrid.RowStyle>
+                    <Style TargetType="DataGridRow">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsPurchased}" Value="True">
+                                <Setter Property="Foreground" Value="#7A8590" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsPlaying}" Value="True">
+                                <Setter Property="FontWeight" Value="Bold" />
+                                <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                <Setter Property="Background" Value="#EAF6FA" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="再生" Command="{Binding PlacementTarget.DataContext.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        <MenuItem Header="選択した曲の情報を取得 (サポーター数・値段)" Command="{Binding PlacementTarget.DataContext.FetchDetailsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        <Separator />
+                        <MenuItem Header="曲を Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        <MenuItem Header="アルバムを Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenAlbumCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        <Separator />
+                        <MenuItem Header="削除" Command="{Binding PlacementTarget.DataContext.RemoveSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.Columns>
+                    <DataGridTemplateColumn Width="28" CanUserSort="False" CanUserResize="False">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate DataType="vm:QueueItemViewModel">
+                                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE768;" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                           Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVis}}" />
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="#" Binding="{Binding Seq}" Width="48" ElementStyle="{StaticResource NumCell}" />
+                    <DataGridTextColumn Header="購入済み" Binding="{Binding PurchaseText}" Width="86" ElementStyle="{StaticResource PurchaseCell}" />
+                    <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="2*" MinWidth="160" ElementStyle="{StaticResource CellText}" />
+                    <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="1.2*" MinWidth="100" ElementStyle="{StaticResource CellText}" />
+                    <DataGridTextColumn Header="アルバム" Binding="{Binding Album}" Width="1.5*" MinWidth="100" ElementStyle="{StaticResource CellText}" />
+                    <DataGridTextColumn Binding="{Binding TotalText}" SortMemberPath="TotalSort" Width="92" ElementStyle="{StaticResource TotalCell}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="サポーター計" ToolTip="アルバムのサポーター + 曲単体のサポーター。&#10;「+」: ページに載りきらないほど多い / 「?」: 曲単体が未取得" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding AlbumSupText}" SortMemberPath="AlbumSupSort" Width="80" ElementStyle="{StaticResource NumCell}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="うちアルバム" ToolTip="収録アルバムを買ったサポーター (— は単独リリースの曲)" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Binding="{Binding TrackSupText}" SortMemberPath="TrackSupSort" Width="72" ElementStyle="{StaticResource NumCell}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="うち曲単体" ToolTip="この曲を単品で買ったサポーター (… は未取得)" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
+                    <DataGridTextColumn Header="曲の値段" Binding="{Binding TrackPriceText}" SortMemberPath="TrackPriceSort" Width="76" ElementStyle="{StaticResource NumCell}" />
+                    <DataGridTextColumn Header="アルバムの値段" Binding="{Binding AlbumPriceText}" SortMemberPath="AlbumPriceSort" Width="96" ElementStyle="{StaticResource NumCell}" />
+                    <DataGridTextColumn Header="リリース日" Binding="{Binding ReleaseDateText}" SortMemberPath="ReleaseDate" Width="90" ElementStyle="{StaticResource CellText}" />
+                    <DataGridTextColumn Header="長さ" Binding="{Binding Duration}" SortMemberPath="DurationSeconds" Width="56" ElementStyle="{StaticResource NumCell}" />
+                </DataGrid.Columns>
+            </DataGrid>
 
-            <!-- ランキング -->
-            <TabItem Header="サポーター数ランキング" DataContext="{Binding Ranking}">
-                <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Margin="0,6,0,6">
-                        <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" />
-                        <DockPanel Margin="0,6,0,0">
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <ComboBox SelectedIndex="{Binding TypeFilter}" Width="110" Margin="4,0,0,0">
-                                    <ComboBoxItem Content="すべて" />
-                                    <ComboBoxItem Content="アルバムのみ" />
-                                    <ComboBoxItem Content="曲のみ" />
-                                </ComboBox>
-                            </StackPanel>
-                            <WrapPanel>
-                                <Button Content="選択をキューに追加" Margin="0"
-                                        Command="{Binding AddSelectedCommand}" CommandParameter="{Binding SelectedItems, ElementName=RankingGrid}" />
-                                <Button Content="表示中をすべてキューに追加" Command="{Binding AddAllCommand}" />
-                                <Button Content="正確な人数を数える" Command="{Binding CountExactCommand}" CommandParameter="{Binding SelectedItems, ElementName=RankingGrid}"
-                                        ToolTip="「N+」の作品について、Bandcamp の「もっと見る」と同じ方法で追加取得して数えます。選択があれば選択分のみ。時間がかかります。" />
-                                <Button Content="再取得" Command="{Binding RefreshCommand}" ToolTip="キャッシュを使わずに取り直します" />
-                                <Button Content="中止" Command="{Binding CancelCommand}" />
-                            </WrapPanel>
-                        </DockPanel>
-                        <Grid Margin="0,6,0,0">
-                            <ProgressBar Height="18" Maximum="{Binding Total}" Value="{Binding Done, Mode=OneWay}" />
-                            <TextBlock Text="{Binding ProgressText}" Margin="6,0" VerticalAlignment="Center" FontSize="12" TextTrimming="CharacterEllipsis" />
-                        </Grid>
-                    </StackPanel>
-
-                    <DataGrid x:Name="RankingGrid" ItemsSource="{Binding RowsView}" AutoGenerateColumns="False" IsReadOnly="True"
-                              SelectionMode="Extended" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
-                              HorizontalGridLinesBrush="#EEF0F2" RowHeight="44"
-                              EnableRowVirtualization="True" VirtualizingPanel.IsVirtualizing="True"
-                              MouseDoubleClick="RankingGrid_MouseDoubleClick">
-                        <DataGrid.ContextMenu>
-                            <ContextMenu>
-                                <MenuItem Header="キューに追加" Command="{Binding PlacementTarget.DataContext.AddSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                <MenuItem Header="Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                <MenuItem Header="正確な人数を数える" Command="{Binding PlacementTarget.DataContext.CountExactCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                          CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                            </ContextMenu>
-                        </DataGrid.ContextMenu>
-                        <DataGrid.Columns>
-                            <DataGridTemplateColumn Width="48" CanUserSort="False">
-                                <DataGridTemplateColumn.CellTemplate>
-                                    <DataTemplate DataType="vm:RankingRowViewModel">
-                                        <Image Source="{Binding ArtUrl, TargetNullValue={x:Null}}" Width="40" Height="40" Stretch="UniformToFill" />
-                                    </DataTemplate>
-                                </DataGridTemplateColumn.CellTemplate>
-                            </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="順位" Binding="{Binding Rank}" SortMemberPath="SortKey" Width="52">
-                                <DataGridTextColumn.ElementStyle>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="HorizontalAlignment" Value="Right" />
-                                        <Setter Property="VerticalAlignment" Value="Center" />
-                                        <Setter Property="Foreground" Value="{StaticResource MutedText}" />
-                                        <Setter Property="Margin" Value="0,0,8,0" />
-                                    </Style>
-                                </DataGridTextColumn.ElementStyle>
-                            </DataGridTextColumn>
-                            <DataGridTextColumn Header="サポーター" Binding="{Binding Supporters}" SortMemberPath="SortKey" SortDirection="Descending" Width="90">
-                                <DataGridTextColumn.ElementStyle>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="HorizontalAlignment" Value="Right" />
-                                        <Setter Property="VerticalAlignment" Value="Center" />
-                                        <Setter Property="FontWeight" Value="SemiBold" />
-                                        <Setter Property="Margin" Value="0,0,8,0" />
-                                    </Style>
-                                </DataGridTextColumn.ElementStyle>
-                            </DataGridTextColumn>
-                            <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="2*" ElementStyle="{StaticResource CellText}" />
-                            <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="*" ElementStyle="{StaticResource CellText}" />
-                            <DataGridTextColumn Header="種類" Binding="{Binding TypeLabel}" Width="70" ElementStyle="{StaticResource CellText}" />
-                            <DataGridTextColumn Header="リリース日" Binding="{Binding ReleaseDateText}" SortMemberPath="ReleaseDate" Width="96" ElementStyle="{StaticResource CellText}" />
-                            <DataGridTextColumn Header="曲数" Binding="{Binding TrackCount}" Width="56" ElementStyle="{StaticResource CellText}" />
-                            <DataGridTextColumn Header="状態" Binding="{Binding StateText}" Width="120" ElementStyle="{StaticResource CellText}" />
-                        </DataGrid.Columns>
-                    </DataGrid>
-                </DockPanel>
-            </TabItem>
-        </TabControl>
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"
+                        Visibility="{Binding IsQueueEmpty, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="キューは空です" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource MutedText}" />
+                <TextBlock Margin="0,10,0,0" Foreground="{StaticResource MutedText}" TextAlignment="Center" LineHeight="24">
+                    上の欄に Bandcamp の URL を貼り付けて Enter<LineBreak />
+                    列の見出しをクリックするとサポーター数や値段で並び替えられます。<LineBreak />
+                    ランダム再生をオフにすると、並べた順に上から再生します。
+                </TextBlock>
+            </StackPanel>
+        </Grid>
     </DockPanel>
 </Window>

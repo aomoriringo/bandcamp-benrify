@@ -1,10 +1,12 @@
 using System.Collections;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using BandcampBenrify.Core;
@@ -30,17 +32,22 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string? _lastHttpMessage;
     private int _consecutiveFailures;
     private bool _retriedCurrent;
+    private int _nextSeq;
+    private HashSet<long> _ownedAlbums = [];
+    private HashSet<long> _ownedTracks = [];
 
     private string _inputUrl = "";
     private string _statusText = "準備完了";
     private string _requestStatus = "";
-    private int _selectedTab;
     private QueueItemViewModel? _current;
     private bool _isPlaying;
     private double _position;
     private double _duration;
     private int _activeJobs;
     private string _jobText = "";
+    private double _jobProgress = -1;
+    private string _detailsButtonText = "";
+    private string _collectionStatus = "";
 
     public MainViewModel(AppSettings settings)
     {
@@ -58,10 +65,24 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             TralbumTtl = TimeSpan.FromHours(settings.PageCacheHours),
             DiscographyTtl = TimeSpan.FromHours(settings.DiscographyCacheHours),
-            ExactCountMaxRequestsPerItem = settings.ExactCountMaxRequestsPerItem,
         };
 
-        Ranking = new RankingViewModel(_client, AddTracks, s => StatusText = s);
+        var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Queue);
+        view.IsLiveSorting = true;
+        foreach (var p in new[]
+                 {
+                     nameof(QueueItemViewModel.TotalSort), nameof(QueueItemViewModel.AlbumSupSort), nameof(QueueItemViewModel.TrackSupSort),
+                     nameof(QueueItemViewModel.TrackPriceSort), nameof(QueueItemViewModel.AlbumPriceSort), nameof(QueueItemViewModel.ReleaseDate),
+                     nameof(QueueItemViewModel.PurchaseText),
+                 })
+        {
+            view.LiveSortingProperties.Add(p);
+        }
+
+        view.IsLiveFiltering = true;
+        view.LiveFilteringProperties.Add(nameof(QueueItemViewModel.IsPurchased));
+        view.Filter = o => !HidePurchased || o is QueueItemViewModel { IsPurchased: false };
+        QueueView = view;
 
         _player.Volume = settings.Volume;
         _order.Shuffle = settings.Shuffle;
@@ -99,12 +120,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 }
             },
             () => !string.IsNullOrWhiteSpace(InputUrl));
-        ShowRankingCommand = new AsyncCommand(() => ShowRankingAsync(InputUrl), () => !string.IsNullOrWhiteSpace(InputUrl));
         PlayPauseCommand = new AsyncCommand(PlayPauseAsync, () => Queue.Count > 0);
         NextCommand = new AsyncCommand(NextAsync, () => Queue.Count > 0);
         PreviousCommand = new AsyncCommand(PreviousAsync, () => Queue.Count > 0);
         PlayItemCommand = new AsyncCommand(p => p is QueueItemViewModel item ? PlayItemAsync(item, userInitiated: true) : Task.CompletedTask);
-        RemoveSelectedCommand = new RelayCommand(p => RemoveItems(p is IList list ? list.OfType<QueueItemViewModel>().ToList() : []), p => p is IList { Count: > 0 });
+        RemoveSelectedCommand = new RelayCommand(p => RemoveItems(Selected(p)), p => p is IList { Count: > 0 });
         ClearQueueCommand = new RelayCommand(() =>
         {
             if (MessageBox.Show($"キューの {Queue.Count} 曲をすべて削除しますか？", "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
@@ -112,31 +132,23 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 RemoveItems(Queue.ToList());
             }
         }, () => Queue.Count > 0);
+        FetchDetailsCommand = new AsyncCommand(p => FetchDetailsAsync(Selected(p)), _ => PendingPageCount > 0);
+        RefreshCollectionCommand = new AsyncCommand(RefreshCollectionAsync, () => HasProfile);
         CancelJobsCommand = new RelayCommand(CancelJobs, () => ActiveJobs > 0);
-        OpenInBrowserCommand = new RelayCommand(p =>
-        {
-            var url = (p as QueueItemViewModel ?? Current)?.Track.TrackUrl;
-            if (!string.IsNullOrEmpty(url))
-            {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-            }
-        });
-        ClearCacheCommand = new RelayCommand(() =>
-        {
-            _cache.Clear();
-            StatusText = "キャッシュを削除しました";
-        });
+        OpenInBrowserCommand = new RelayCommand(p => OpenUrl((p as QueueItemViewModel ?? Current)?.Track.TrackUrl));
+        OpenAlbumCommand = new RelayCommand(p => OpenUrl(p is QueueItemViewModel q ? TrackDetailsResolver.AlbumUrlOf(q.Track) : null));
 
         LoadQueue();
+        LoadCachedCollection();
+        UpdatePendingCount();
     }
 
     public ObservableCollection<QueueItemViewModel> Queue { get; } = [];
 
-    public RankingViewModel Ranking { get; }
+    /// <summary>並び替え・絞り込み済みのキュー。シャッフルしないときはこの順に再生する。</summary>
+    public ICollectionView QueueView { get; }
 
     public ICommand AddUrlCommand { get; }
-
-    public ICommand ShowRankingCommand { get; }
 
     public ICommand PlayPauseCommand { get; }
 
@@ -150,11 +162,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public ICommand ClearQueueCommand { get; }
 
+    public ICommand FetchDetailsCommand { get; }
+
+    public ICommand RefreshCollectionCommand { get; }
+
     public ICommand CancelJobsCommand { get; }
 
     public ICommand OpenInBrowserCommand { get; }
 
-    public ICommand ClearCacheCommand { get; }
+    public ICommand OpenAlbumCommand { get; }
+
+    public AppSettings Settings => _settings;
 
     public string InputUrl
     {
@@ -174,13 +192,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private set => Set(ref _requestStatus, value);
     }
 
-    public int SelectedTab
+    public string QueueSummary
     {
-        get => _selectedTab;
-        set => Set(ref _selectedTab, value);
+        get
+        {
+            var shown = HidePurchased ? Queue.Count(q => !q.IsPurchased) : Queue.Count;
+            var total = TimeSpan.FromSeconds(Queue.Sum(q => q.DurationSeconds));
+            var text = $"{Queue.Count} 曲 ({(total.TotalHours >= 1 ? $"{(int)total.TotalHours}時間{total.Minutes}分" : $"{total.Minutes}分")})";
+            return HidePurchased && shown != Queue.Count ? $"{text} / 表示 {shown} 曲" : text;
+        }
     }
-
-    public string QueueHeader => $"キュー ({Queue.Count})";
 
     public bool IsQueueEmpty => Queue.Count == 0;
 
@@ -202,6 +223,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(NowTitle));
                 OnPropertyChanged(nameof(NowSubtitle));
                 OnPropertyChanged(nameof(NowArtUrl));
+                OnPropertyChanged(nameof(NowStats));
                 OnPropertyChanged(nameof(WindowTitle));
             }
 
@@ -215,6 +237,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string NowTitle => Current?.Title ?? "再生していません";
 
     public string NowSubtitle => Current is null ? "" : $"{Current.Artist} — {Current.Album}";
+
+    /// <summary>再生中の曲のサポーター数と値段。</summary>
+    public string NowStats => Current is null
+        ? ""
+        : $"サポーター {Current.TotalText} (アルバム {Current.AlbumSupText} / 曲 {Current.TrackSupText})   曲 {Current.TrackPriceText}   アルバム {Current.AlbumPriceText}"
+          + (Current.IsPurchased ? $"   {Current.PurchaseText}購入済み" : "");
 
     public string? NowArtUrl => Current?.Track.ArtId is long id ? BandcampUrls.ArtUrl(id, ArtSize.Medium) : null;
 
@@ -244,9 +272,70 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 _order.Shuffle = value;
                 _settings.Shuffle = value;
+                _settings.Save();
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(PlayModeText));
             }
         }
+    }
+
+    public string PlayModeText => Shuffle ? "ランダム再生" : "表示順に再生";
+
+    public bool HidePurchased
+    {
+        get => _settings.HidePurchased;
+        set
+        {
+            if (_settings.HidePurchased != value)
+            {
+                _settings.HidePurchased = value;
+                _settings.Save();
+                OnPropertyChanged();
+                QueueView.Refresh();
+                OnPropertyChanged(nameof(QueueSummary));
+            }
+        }
+    }
+
+    public string BandcampUsername => _settings.BandcampUsername;
+
+    public bool HasProfile => !string.IsNullOrEmpty(BandcampUsername);
+
+    public long CacheSizeBytes => _cache.SizeBytes();
+
+    public void ClearCache()
+    {
+        _cache.Clear();
+        StatusText = "キャッシュを削除しました";
+    }
+
+    /// <summary>設定画面から。プロフィールが変わったらコレクションを読み込み直す。</summary>
+    public void ApplySettings(string username, double requestIntervalSeconds)
+    {
+        _settings.RequestIntervalSeconds = requestIntervalSeconds;
+        _http.MinInterval = TimeSpan.FromSeconds(requestIntervalSeconds);
+
+        var changed = !string.Equals(_settings.BandcampUsername, username, StringComparison.OrdinalIgnoreCase);
+        _settings.BandcampUsername = username;
+        _settings.Save();
+        OnPropertyChanged(nameof(BandcampUsername));
+        OnPropertyChanged(nameof(HasProfile));
+        UpdatePendingCount();
+
+        if (changed)
+        {
+            ApplyCollection(_client.TryGetCachedCollection(username));
+            if (HasProfile && RefreshCollectionCommand.CanExecute(null))
+            {
+                RefreshCollectionCommand.Execute(null);
+            }
+        }
+    }
+
+    public string CollectionStatus
+    {
+        get => _collectionStatus;
+        private set => Set(ref _collectionStatus, value);
     }
 
     public double Volume
@@ -316,6 +405,30 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private set => Set(ref _jobText, value);
     }
 
+    /// <summary>0〜1。不明なら -1 (バーは不定表示)。</summary>
+    public double JobProgress
+    {
+        get => _jobProgress;
+        private set
+        {
+            if (Set(ref _jobProgress, value))
+            {
+                OnPropertyChanged(nameof(JobProgressIndeterminate));
+            }
+        }
+    }
+
+    public bool JobProgressIndeterminate => JobProgress < 0;
+
+    /// <summary>未取得の曲ページ / アルバムページの数。</summary>
+    public int PendingPageCount { get; private set; }
+
+    public string DetailsButtonText
+    {
+        get => _detailsButtonText;
+        private set => Set(ref _detailsButtonText, value);
+    }
+
     public void SeekTo(double seconds)
     {
         if (Current is not null)
@@ -366,9 +479,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 noAudio++;
             }
 
-            JobText = kind == UrlKind.Band
-                ? $"追加中 {p.Done}/{p.Total} 作品: {p.Current}"
-                : $"取得中: {p.Current}";
+            if (kind == UrlKind.Band)
+            {
+                var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * Math.Max(0, p.Total - p.Done));
+                JobText = $"追加中 {p.Done}/{p.Total} 作品 (取得済みの作品はすぐ終わります。最大で残り約 {Format.Eta(eta)}): {p.Current}";
+                JobProgress = p.Total > 0 ? (double)p.Done / p.Total : -1;
+            }
+            else
+            {
+                JobText = $"取得中: {p.Current}";
+                JobProgress = -1;
+            }
         });
 
         try
@@ -384,11 +505,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             var skipped = found - added;
             StatusText = found == 0
-                ? "再生できる曲が見つかりませんでした (ストリーミング非対応の作品の可能性があります)"
+                ? "再生できる曲が見つかりませんでした (試聴が公開されていない作品の可能性があります)"
                 : $"{added} 曲をキューに追加しました"
                     + (skipped > 0 ? $" ({skipped} 曲は追加済みのためスキップ)" : "")
                     + (noAudio > 0 ? $" (試聴できない作品: {noAudio})" : "")
-                    + (errors > 0 ? $" (取得に失敗した作品: {errors})" : "");
+                    + (errors > 0 ? $" (取得に失敗した作品: {errors})" : "")
+                    + (added > 0 ? "。曲単体のサポーター数・値段は「曲の情報を取得」で取得できます" : "");
         }
         catch (OperationCanceledException)
         {
@@ -400,12 +522,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
         finally
         {
-            ActiveJobs--;
-            if (ActiveJobs == 0)
-            {
-                JobText = "";
-            }
-
+            EndJob();
+            UpdatePendingCount();
             SaveQueue();
         }
 
@@ -420,7 +538,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (_queuedTrackIds.Add(track.TrackId))
             {
-                var vm = new QueueItemViewModel(track);
+                var vm = new QueueItemViewModel(track, ++_nextSeq);
+                RefreshItem(vm);
                 Queue.Add(vm);
                 added.Add(vm);
             }
@@ -429,9 +548,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (added.Count > 0)
         {
             _order.OnAdded(added);
-            OnPropertyChanged(nameof(QueueHeader));
-            OnPropertyChanged(nameof(IsQueueEmpty));
-            CommandManager.InvalidateRequerySuggested();
+            OnQueueChanged();
         }
 
         return added.Count;
@@ -455,21 +572,179 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _order.Reset();
         }
 
-        OnPropertyChanged(nameof(QueueHeader));
-        OnPropertyChanged(nameof(IsQueueEmpty));
+        OnQueueChanged();
+        UpdatePendingCount();
         SaveQueue();
     }
 
-    public async Task ShowRankingAsync(string url)
+    private void OnQueueChanged()
     {
-        url = url.Trim();
-        if (url.Length == 0)
+        OnPropertyChanged(nameof(QueueSummary));
+        OnPropertyChanged(nameof(IsQueueEmpty));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    // ---- 曲ごとのサポーター数・値段 ----
+
+    /// <summary>キャッシュ済みのページからサポーター数・値段・購入済みを計算し直す (リクエストは送らない)。</summary>
+    private void RefreshItem(QueueItemViewModel item)
+    {
+        var details = TrackDetailsResolver.Resolve(item.Track, _client.TryGetCachedTralbum);
+        item.Update(details);
+        item.Purchase = TrackDetailsResolver.Purchased(item.Track, details, _ownedAlbums, _ownedTracks);
+        if (ReferenceEquals(item, Current))
         {
+            OnPropertyChanged(nameof(NowStats));
+        }
+    }
+
+    private void UpdatePendingCount()
+    {
+        PendingPageCount = Queue.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().Count();
+        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * PendingPageCount);
+        DetailsButtonText = PendingPageCount == 0
+            ? "曲の情報: すべて取得済み"
+            : $"曲の情報を取得 (未取得 {PendingPageCount} ページ・約 {Format.Eta(eta)})";
+        OnPropertyChanged(nameof(PendingPageCount));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>
+    /// 曲ページ (曲単体のサポーター数・値段) と、未取得のアルバムページを取得する。
+    /// 1 曲 1 リクエストなので、選択があれば選択した曲だけ、なければ表示中の曲を上から順に。
+    /// </summary>
+    private async Task FetchDetailsAsync(IReadOnlyList<QueueItemViewModel> selected)
+    {
+        var targets = selected.Count > 0 ? selected : QueueView.Cast<QueueItemViewModel>().ToList();
+        var urls = targets.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().ToList();
+        if (urls.Count == 0)
+        {
+            StatusText = "選択した曲の情報はすべて取得済みです";
             return;
         }
 
-        SelectedTab = 1;
-        await Ranking.LoadAsync(url);
+        var seen = new HashSet<string>(urls);
+        var ct = _jobsCts.Token;
+        ActiveJobs++;
+        var done = 0;
+        var errors = 0;
+        try
+        {
+            for (var i = 0; i < urls.Count; i++)
+            {
+                var url = urls[i];
+                ct.ThrowIfCancellationRequested();
+                var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (urls.Count - done));
+                JobText = $"曲の情報を取得中 {done}/{urls.Count} (残り約 {Format.Eta(eta)})";
+                JobProgress = (double)done / urls.Count;
+                try
+                {
+                    await _client.GetTralbumAsync(url, RequestPriority.Background, ct: ct);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
+                {
+                    errors++;
+                    Debug.WriteLine($"{url}: {ex.Message}");
+                }
+
+                done++;
+                foreach (var item in Queue.Where(q => BandcampUrls.Normalize(q.Track.TrackUrl) == url
+                                                      || (q.Details.AlbumUrl is { } a && BandcampUrls.Normalize(a) == url)))
+                {
+                    RefreshItem(item);
+
+                    // 曲ページを取って初めて収録アルバムが分かった場合は、そのアルバムページも続けて取る
+                    foreach (var missing in item.Details.MissingPages(item.Track).Select(BandcampUrls.Normalize))
+                    {
+                        if (seen.Add(missing))
+                        {
+                            urls.Add(missing);
+                        }
+                    }
+                }
+            }
+
+            StatusText = $"{done} ページの情報を取得しました" + (errors > 0 ? $" (失敗 {errors})" : "");
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"取得を中止しました ({done}/{urls.Count})";
+        }
+        finally
+        {
+            EndJob();
+            UpdatePendingCount();
+        }
+    }
+
+    // ---- コレクション (購入済み) ----
+
+    private void LoadCachedCollection() => ApplyCollection(_client.TryGetCachedCollection(BandcampUsername));
+
+    private async Task RefreshCollectionAsync()
+    {
+        ActiveJobs++;
+        JobProgress = -1;
+        JobText = "コレクションを確認中…";
+        try
+        {
+            var progress = new Progress<CollectionProgress>(p =>
+            {
+                var remaining = Math.Max(0, p.Total - p.Loaded);
+                var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (long)Math.Ceiling(remaining / (double)BandcampClient.CollectionBatchSize));
+                JobText = remaining == 0
+                    ? $"コレクションを読み込み中 {p.Loaded} 件"
+                    : $"コレクションを読み込み中 {p.Loaded}/{p.Total} 件 (Bandcamp は 1 回 20 件ずつなので残り約 {Format.Eta(eta)}。中止しても次回は続きから読み込みます)";
+                JobProgress = p.Total > 0 ? Math.Min(1, (double)p.Loaded / p.Total) : -1;
+                if (p.Partial is { } partial)
+                {
+                    ApplyCollection(partial);
+                }
+            });
+            var collection = await _client.GetCollectionAsync(BandcampUsername, progress, _jobsCts.Token);
+            ApplyCollection(collection);
+            StatusText = $"コレクション {collection.Count} 件を読み込みました。キュー内の購入済み: {Queue.Count(q => q.IsPurchased)} 曲";
+        }
+        catch (OperationCanceledException)
+        {
+            var partial = _client.TryGetCachedCollection(BandcampUsername);
+            ApplyCollection(partial);
+            StatusText = $"コレクションの読み込みを中止しました ({partial?.Count ?? 0} 件まで読み込み済み。「コレクション更新」で続きから読み込めます)";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException or ArgumentException)
+        {
+            StatusText = "コレクションを取得できませんでした: " + ex.Message;
+        }
+        finally
+        {
+            EndJob();
+        }
+    }
+
+    private void ApplyCollection(FanCollection? collection)
+    {
+        _ownedAlbums = collection is null ? [] : [.. collection.AlbumIds];
+        _ownedTracks = collection is null ? [] : [.. collection.TrackIds];
+        foreach (var item in Queue)
+        {
+            RefreshItem(item);
+        }
+
+        CollectionStatus = !HasProfile ? "プロフィール未設定 (設定から登録すると購入済みに印が付きます)"
+            : collection is null ? $"{BandcampUsername} のコレクション: 未読み込み"
+            : collection.Complete ? $"{BandcampUsername} のコレクション: {collection.Count} 件 ({collection.FetchedAt.ToLocalTime():M/d HH:mm} 時点)"
+            : $"{BandcampUsername} のコレクション: {collection.Count}/{collection.ItemCount} 件 (読み込み途中)";
+        OnPropertyChanged(nameof(QueueSummary));
+    }
+
+    private void EndJob()
+    {
+        ActiveJobs--;
+        if (ActiveJobs == 0)
+        {
+            JobText = "";
+            JobProgress = -1;
+        }
     }
 
     private void CancelJobs()
@@ -479,6 +754,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     // ---- 再生 ----
+
+    /// <summary>今の表示順 (並び替え・絞り込み後) のキュー。</summary>
+    private List<QueueItemViewModel> PlaybackList() => QueueView.Cast<QueueItemViewModel>().ToList();
 
     private async Task PlayPauseAsync()
     {
@@ -502,7 +780,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task NextAsync()
     {
-        var next = _order.Next(Queue, Current);
+        var next = _order.Next(PlaybackList(), Current);
         if (next is null)
         {
             StopPlayback();
@@ -520,7 +798,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var prev = _order.Previous(Queue, Current);
+        var prev = _order.Previous(PlaybackList(), Current);
         if (prev is not null)
         {
             await PlayItemAsync(prev, userInitiated: false);
@@ -675,6 +953,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
+    private static List<QueueItemViewModel> Selected(object? parameter) =>
+        parameter is IList list ? list.OfType<QueueItemViewModel>().ToList() : [];
+
+    private static void OpenUrl(string? url)
+    {
+        if (!string.IsNullOrEmpty(url))
+        {
+            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+    }
+
     // ---- Chrome 拡張から ----
 
     public Task EnqueueFromExtensionAsync(string url) =>
@@ -683,27 +972,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             StatusText = "拡張機能から追加: " + url;
             _ = RunSafeAsync(AddUrlAsync(url));
         }).Task;
-
-    public Task RankingFromExtensionAsync(string url) =>
-        Application.Current.Dispatcher.InvokeAsync(() =>
-        {
-            InputUrl = url;
-            BringToFront();
-            _ = RunSafeAsync(ShowRankingAsync(url));
-        }).Task;
-
-    private static void BringToFront()
-    {
-        if (Application.Current.MainWindow is { } w)
-        {
-            if (w.WindowState == WindowState.Minimized)
-            {
-                w.WindowState = WindowState.Normal;
-            }
-
-            w.Activate();
-        }
-    }
 
     // ---- 永続化 ----
 
@@ -728,7 +996,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         try
         {
             Directory.CreateDirectory(AppPaths.DataDir);
-            var tracks = Queue.Select(q => q.Track with { StreamUrl = null }).ToList();
+            var tracks = Queue.OrderBy(q => q.Seq).Select(q => q.Track with { StreamUrl = null }).ToList();
             File.WriteAllText(AppPaths.QueueFile, JsonSerializer.Serialize(tracks));
         }
         catch (IOException)
@@ -742,7 +1010,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SaveQueue();
         _settings.Save();
         _jobsCts.Cancel();
-        Ranking.Cancel();
         _player.Stop();
         _player.Dispose();
         _http.Dispose();

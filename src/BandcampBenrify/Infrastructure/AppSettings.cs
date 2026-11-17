@@ -16,6 +16,8 @@ public static class AppPaths
     public static string QueueFile => Path.Combine(DataDir, "queue.json");
 }
 
+public sealed record WindowBounds(double Left, double Top, double Width, double Height, bool Maximized);
+
 public sealed class AppSettings
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
@@ -29,15 +31,20 @@ public sealed class AppSettings
     /// <summary>作品一覧のキャッシュ有効時間。</summary>
     public double DiscographyCacheHours { get; set; } = 12;
 
-    /// <summary>正確なサポーター数を数えるときの 1 作品あたりのリクエスト上限。</summary>
-    public int ExactCountMaxRequestsPerItem { get; set; } = 30;
-
     /// <summary>Chrome 拡張から操作を受け付けるポート (localhost のみ)。0 で無効。</summary>
     public int LocalApiPort { get; set; } = 47823;
 
     public double Volume { get; set; } = 0.7;
 
     public bool Shuffle { get; set; } = true;
+
+    /// <summary>購入済みマーク用の Bandcamp ユーザー名 (bandcamp.com/○○)。</summary>
+    public string BandcampUsername { get; set; } = "";
+
+    /// <summary>購入済みの曲をキューの表示 (と再生) から外す。</summary>
+    public bool HidePurchased { get; set; }
+
+    public WindowBounds? Window { get; set; }
 
     public static AppSettings Load()
     {

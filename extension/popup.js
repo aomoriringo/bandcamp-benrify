@@ -24,23 +24,17 @@ async function main() {
 
   $("enqueue").textContent = LABELS[kindOf(url)];
   $("enqueue").disabled = !alive;
-  $("ranking").disabled = !alive;
-
-  for (const action of ["enqueue", "ranking"]) {
-    $(action).addEventListener("click", async () => {
-      $(action).disabled = true;
-      try {
-        await send(action, url);
-        $("result").textContent = action === "enqueue"
-          ? "送信しました。アプリ側で順番に取得します。"
-          : "アプリでランキングを表示します。";
-      } catch (e) {
-        $("result").textContent = e.message;
-      } finally {
-        $(action).disabled = false;
-      }
-    });
-  }
+  $("enqueue").addEventListener("click", async () => {
+    $("enqueue").disabled = true;
+    try {
+      await send(url);
+      $("result").textContent = "送信しました。アプリ側で順番に取得します。";
+    } catch (e) {
+      $("result").textContent = e.message;
+    } finally {
+      $("enqueue").disabled = false;
+    }
+  });
 }
 
 main();

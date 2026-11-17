@@ -64,7 +64,7 @@ public class ParserTests
         Assert.Null(page.Tracks[1].StreamUrl);
 
         // thumbs 3 + reviews 1 + 重複 1 → 4 人
-        Assert.Equal(4, page.Supporters.VisibleCount);
+        Assert.Equal(4, page.Supporters.Count);
         Assert.False(page.Supporters.HasMore);
         Assert.Equal("4", page.Supporters.Display);
     }
@@ -76,8 +76,6 @@ public class ParserTests
 
         Assert.True(page.Supporters.HasMore);
         Assert.Equal("86+", page.Supporters.Display);
-        Assert.Equal("tok80", page.Supporters.LastThumbToken);
-        Assert.Equal("rdup", page.Supporters.LastReviewToken);
         Assert.True(page.Supporters.SortKey > 86);
     }
 
@@ -86,7 +84,7 @@ public class ParserTests
     {
         var html = AlbumHtml(false).Replace("collectors-data", "something-else");
         var page = BandcampParser.ParseTralbum(html, "https://x.bandcamp.com/album/a", Now);
-        Assert.Equal(0, page.Supporters.VisibleCount);
+        Assert.Equal(0, page.Supporters.Count);
         Assert.Equal("0", page.Supporters.Display);
     }
 

@@ -60,6 +60,37 @@ public static class BandcampUrls
         return $"https://{uri.Host}";
     }
 
+    /// <summary>
+    /// ファンのプロフィール (「aomoriringo」「@aomoriringo」「https://bandcamp.com/aomoriringo?from=x」など) からユーザー名を取り出す。
+    /// 解釈できなければ null。
+    /// </summary>
+    public static string? ParseFanUsername(string? input)
+    {
+        var s = input?.Trim() ?? "";
+        if (s.Length == 0)
+        {
+            return null;
+        }
+
+        if (s.Contains("bandcamp.com", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!s.Contains("://", StringComparison.Ordinal))
+            {
+                s = "https://" + s;
+            }
+
+            if (!Uri.TryCreate(s, UriKind.Absolute, out var uri) || !uri.Host.Equals("bandcamp.com", StringComparison.OrdinalIgnoreCase) && !uri.Host.Equals("www.bandcamp.com", StringComparison.OrdinalIgnoreCase))
+            {
+                return null; // xxx.bandcamp.com はアーティストのページ
+            }
+
+            s = uri.AbsolutePath.Trim('/').Split('/')[0];
+        }
+
+        s = s.TrimStart('@');
+        return s.Length > 0 && s.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.') ? s : null;
+    }
+
     public static string ArtUrl(long? artId, ArtSize size) =>
         artId is long id && id > 0
             ? $"https://f4.bcbits.com/img/a{id.ToString("D10", CultureInfo.InvariantCulture)}_{(int)size}.jpg"
