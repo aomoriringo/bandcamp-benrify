@@ -18,6 +18,7 @@ public partial class App : Application
         DispatcherUnhandledException += OnUnhandledException;
 
         var settings = AppSettings.Load();
+        Theme.Apply(Theme.Parse(settings.ThemeColor) ?? Theme.Parse(Theme.DefaultAccent)!.Value, settings.PlayerUsesArtColor);
         _vm = new MainViewModel(settings);
 
         var window = new MainWindow { DataContext = _vm };

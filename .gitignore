@@ -6,3 +6,6 @@ artifacts/
 .vs/
 .vscode/
 TestResults/
+
+# 開発中の版を試すときのデータ (BENRIFY_DATA_DIR)
+devdata/

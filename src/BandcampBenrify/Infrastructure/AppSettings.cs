@@ -6,8 +6,14 @@ namespace BandcampBenrify.Infrastructure;
 
 public static class AppPaths
 {
-    /// <summary>%APPDATA%\BandcampBenrify (設定・キュー)</summary>
-    public static string DataDir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BandcampBenrify");
+    /// <summary>
+    /// %APPDATA%\BandcampBenrify (設定・キュー)。
+    /// 環境変数 BENRIFY_DATA_DIR があればそちらを使う (開発中の版を、普段使っている版のキューや設定に触れずに動かすため)。
+    /// </summary>
+    public static string DataDir { get; } =
+        Environment.GetEnvironmentVariable("BENRIFY_DATA_DIR") is { Length: > 0 } dir
+            ? dir
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "BandcampBenrify");
 
     /// <summary>%LOCALAPPDATA%\BandcampBenrify\cache</summary>
     public static string CacheDir { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BandcampBenrify", "cache");
@@ -62,6 +68,12 @@ public sealed class AppSettings
 
     /// <summary>チェック済みの曲をキューの表示 (と再生) から外す。</summary>
     public bool HideChecked { get; set; }
+
+    /// <summary>テーマカラー (#RRGGBB)。</summary>
+    public string ThemeColor { get; set; } = Theme.DefaultAccent;
+
+    /// <summary>再生バーの色を、再生中の曲のジャケットに合わせる。</summary>
+    public bool PlayerUsesArtColor { get; set; } = true;
 
     public WindowBounds? Window { get; set; }
 

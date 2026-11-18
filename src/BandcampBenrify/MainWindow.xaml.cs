@@ -4,6 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using BandcampBenrify.Core;
 using BandcampBenrify.Infrastructure;
 using BandcampBenrify.ViewModels;
 
@@ -42,7 +44,74 @@ public partial class MainWindow : Window
                 var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
                 vm.Settings.Window = new WindowBounds(r.Left, r.Top, r.Width, r.Height, WindowState == WindowState.Maximized, WindowBounds.CurrentVersion);
             }
+
+            Theme.Changed -= UpdatePlayerColors;
         };
+
+        // 再生バーの色: 表示したジャケット画像から色を取る (色のために画像を取り直すことはしない)
+        DependencyPropertyDescriptor.FromProperty(Image.SourceProperty, typeof(Image)).AddValueChanged(NowArtImage, (_, _) => OnNowArtChanged());
+        Theme.Changed += UpdatePlayerColors;
+    }
+
+    /// <summary>再生中のジャケットの代表色 (色味のないジャケットや未表示なら null)。</summary>
+    private Rgb? _artColor;
+
+    private void OnNowArtChanged()
+    {
+        _artColor = null;
+        if (NowArtImage.Source is BitmapSource bitmap)
+        {
+            if (bitmap.IsDownloading)
+            {
+                bitmap.DownloadCompleted += (_, _) =>
+                {
+                    if (ReferenceEquals(NowArtImage.Source, bitmap))
+                    {
+                        _artColor = PickArtColor(bitmap);
+                        UpdatePlayerColors();
+                    }
+                };
+            }
+            else
+            {
+                _artColor = PickArtColor(bitmap);
+            }
+        }
+
+        UpdatePlayerColors();
+    }
+
+    private static Rgb? PickArtColor(BitmapSource bitmap)
+    {
+        try
+        {
+            var bgra = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
+            var stride = bgra.PixelWidth * 4;
+            var pixels = new byte[stride * bgra.PixelHeight];
+            bgra.CopyPixels(pixels, stride, 0);
+            return ArtPalette.Dominant(pixels);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.IO.IOException or System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>再生バーの背景とアクセントを、ジャケットの色 (設定でオフならテーマカラー) にする。</summary>
+    private void UpdatePlayerColors()
+    {
+        if (Theme.PlayerUsesArtColor && _artColor is { } c)
+        {
+            var accent = ArtPalette.Accent(c);
+            var bg = ArtPalette.Background(c);
+            Theme.SetAccent(PlayerBar.Resources, Color.FromRgb(accent.R, accent.G, accent.B));
+            PlayerBar.Background = Theme.Frozen(Color.FromRgb(bg.R, bg.G, bg.B));
+        }
+        else
+        {
+            Theme.ClearAccent(PlayerBar.Resources);
+            PlayerBar.Background = (Brush)FindResource("SurfaceBrush");
+        }
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
@@ -114,15 +183,6 @@ public partial class MainWindow : Window
         if (Vm is { } vm)
         {
             new SettingsWindow(vm) { Owner = this }.ShowDialog();
-        }
-    }
-
-    private void ResetSort_Click(object sender, RoutedEventArgs e)
-    {
-        QueueGrid.Items.SortDescriptions.Clear();
-        foreach (var c in QueueGrid.Columns)
-        {
-            c.SortDirection = null;
         }
     }
 

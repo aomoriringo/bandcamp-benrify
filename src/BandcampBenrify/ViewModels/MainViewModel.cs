@@ -787,8 +787,27 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SaveQueue();
     }
 
+    private double _queueMaxSupporters = 1;
+
+    /// <summary>
+    /// サポーター数の棒の長さの基準 (これ以上は棒が最大)。
+    /// いちばん多い曲に合わせると、1 曲だけ飛び抜けているときに他の棒が全部短くなるので、多い方から 1 割の位置の数にする。
+    /// </summary>
+    public double QueueMaxSupporters
+    {
+        get => _queueMaxSupporters;
+        private set => Set(ref _queueMaxSupporters, value);
+    }
+
+    private void UpdateQueueMaxSupporters()
+    {
+        var values = Queue.Select(q => q.TotalSort).Where(v => v > 0).Order().ToList();
+        QueueMaxSupporters = values.Count == 0 ? 1 : Math.Max(1, values[(int)((values.Count - 1) * 0.9)]);
+    }
+
     private void OnQueueChanged()
     {
+        UpdateQueueMaxSupporters();
         SchedulePendingUpdate();
         OnPropertyChanged(nameof(QueueSummary));
         OnPropertyChanged(nameof(QueueHeader));
@@ -811,6 +830,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         item.IsQueued = _queuedTrackIds.Contains(item.Track.TrackId);
         item.CheckRequested ??= (row, value) => SetChecked([row], value);
         item.SetCheckedState(_checked.Contains(item.Track.TrackId));
+        if (Queue.Contains(item))
+        {
+            UpdateQueueMaxSupporters();
+        }
+
         if (ReferenceEquals(item, Current))
         {
             OnPropertyChanged(nameof(NowStats));
