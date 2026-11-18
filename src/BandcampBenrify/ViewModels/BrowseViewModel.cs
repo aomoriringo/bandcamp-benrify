@@ -62,7 +62,7 @@ public sealed class BrowseItemViewModel : ObservableObject
                     Id = value.Id;
                 }
 
-                foreach (var p in new[] { nameof(Label), nameof(SupText), nameof(SupSort), nameof(PriceText), nameof(PriceSort), nameof(ReleaseDate), nameof(ReleaseDateText), nameof(TrackCount), nameof(StateText), nameof(HasAudio) })
+                foreach (var p in new[] { nameof(Label), nameof(SupText), nameof(SupSort), nameof(PriceText), nameof(PriceSort), nameof(ReleaseDate), nameof(ReleaseDateText), nameof(TrackCount), nameof(StateText), nameof(HasAudio), nameof(CheckedText), nameof(IsAllChecked) })
                 {
                     OnPropertyChanged(p);
                 }
@@ -136,6 +136,29 @@ public sealed class BrowseItemViewModel : ObservableObject
         PurchaseState.Track => "✓ 曲",
         _ => "",
     };
+
+    private int _checkedTracks;
+
+    /// <summary>チェック済み (聴いた上で買わない) の曲数。曲目が分かっている (ページ取得済みの) 作品だけ。</summary>
+    public int CheckedTracks
+    {
+        get => _checkedTracks;
+        set
+        {
+            if (Set(ref _checkedTracks, value))
+            {
+                OnPropertyChanged(nameof(CheckedText));
+                OnPropertyChanged(nameof(IsAllChecked));
+            }
+        }
+    }
+
+    /// <summary>全曲チェック済みか。</summary>
+    public bool IsAllChecked => TrackCount is > 0 && CheckedTracks >= TrackCount;
+
+    public string CheckedText => CheckedTracks == 0 || TrackCount is not > 0 ? ""
+        : IsAllChecked ? (TrackCount == 1 ? "✓" : "✓ 全曲")
+        : $"{CheckedTracks}/{TrackCount} 曲";
 }
 
 /// <summary>
@@ -152,6 +175,7 @@ public sealed class BrowseViewModel : ObservableObject
     private string _title = "";
     private string _filterText = "";
     private bool _hidePurchased;
+    private bool _hideChecked;
     private BrowseItemViewModel? _selectedItem;
     private bool _fetchingReleases;
     private string _releaseInfoButtonText = "";
@@ -171,6 +195,8 @@ public sealed class BrowseViewModel : ObservableObject
 
         view.IsLiveFiltering = true;
         view.LiveFilteringProperties.Add(nameof(BrowseItemViewModel.IsPurchased));
+        view.LiveFilteringProperties.Add(nameof(BrowseItemViewModel.IsAllChecked));
+        view.LiveSortingProperties.Add(nameof(BrowseItemViewModel.CheckedTracks));
         view.Filter = o => o is BrowseItemViewModel item && MatchesFilter(item);
         ItemsView = view;
 
@@ -224,6 +250,24 @@ public sealed class BrowseViewModel : ObservableObject
     public ICommand FetchTrackInfoCommand { get; }
 
     public ICommand OpenInBrowserCommand { get; }
+
+    /// <summary>曲目の右クリック「チェック済みにする」(キューと同じ記録)。</summary>
+    public ICommand CheckSelectedCommand => _host.CheckSelectedCommand;
+
+    public ICommand UncheckSelectedCommand => _host.UncheckSelectedCommand;
+
+    /// <summary>全曲チェック済みの作品を一覧から隠す。</summary>
+    public bool HideChecked
+    {
+        get => _hideChecked;
+        set
+        {
+            if (Set(ref _hideChecked, value))
+            {
+                ItemsView.Refresh();
+            }
+        }
+    }
 
     public string Title
     {
@@ -332,6 +376,11 @@ public sealed class BrowseViewModel : ObservableObject
             if (s.IsPurchased)
             {
                 parts.Add(s.PurchaseText + " 購入済み");
+            }
+
+            if (s.CheckedTracks > 0)
+            {
+                parts.Add(s.IsAllChecked ? "✓ 全曲チェック済み" : $"チェック済み {s.CheckedText}");
             }
 
             return string.Join("   ", parts);
@@ -448,7 +497,7 @@ public sealed class BrowseViewModel : ObservableObject
 
     private bool MatchesFilter(BrowseItemViewModel item)
     {
-        if (HidePurchased && item.IsPurchased)
+        if ((HidePurchased && item.IsPurchased) || (HideChecked && item.IsAllChecked))
         {
             return false;
         }
@@ -475,6 +524,18 @@ public sealed class BrowseViewModel : ObservableObject
             : _host.OwnsTrack(row.Id) ? PurchaseState.Track
             : row.Page?.AlbumId is long a && _host.OwnsAlbum(a) ? PurchaseState.Album
             : PurchaseState.None;
+        row.CheckedTracks = row.Page?.Tracks.Count(t => _host.IsChecked(t.TrackId)) ?? 0;
+    }
+
+    /// <summary>チェック済みが変わったとき (作品ごとのチェック済み曲数を数え直す。リクエストは送らない)。</summary>
+    public void RefreshCheckedCounts()
+    {
+        foreach (var row in Items.Where(i => i.Page is not null))
+        {
+            row.CheckedTracks = row.Page!.Tracks.Count(t => _host.IsChecked(t.TrackId));
+        }
+
+        OnPropertyChanged(nameof(SelectedSummary));
     }
 
     private void UpdatePendingCount()

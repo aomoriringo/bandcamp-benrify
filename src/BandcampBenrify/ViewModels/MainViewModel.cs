@@ -42,6 +42,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private bool _loadingCollection;
     private HashSet<long> _ownedAlbums = [];
     private HashSet<long> _ownedTracks = [];
+    private readonly CheckedTrackStore _checked;
+
+    /// <summary>
+    /// 再生中の曲が表示から外れた (チェックして隠した) ときに、次の曲を決めるための「さっきまでの位置」。
+    /// </summary>
+    private int _currentIndexHint = -1;
 
     private string _inputUrl = "";
     private string _statusText = "準備完了";
@@ -80,7 +86,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                  {
                      nameof(QueueItemViewModel.TotalSort), nameof(QueueItemViewModel.AlbumSupSort), nameof(QueueItemViewModel.TrackSupSort),
                      nameof(QueueItemViewModel.TrackPriceSort), nameof(QueueItemViewModel.AlbumPriceSort), nameof(QueueItemViewModel.ReleaseDate),
-                     nameof(QueueItemViewModel.PurchaseText),
+                     nameof(QueueItemViewModel.PurchaseText), nameof(QueueItemViewModel.CheckedSort),
                  })
         {
             view.LiveSortingProperties.Add(p);
@@ -88,8 +94,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         view.IsLiveFiltering = true;
         view.LiveFilteringProperties.Add(nameof(QueueItemViewModel.IsPurchased));
-        view.Filter = o => !HidePurchased || o is QueueItemViewModel { IsPurchased: false };
+        view.LiveFilteringProperties.Add(nameof(QueueItemViewModel.IsChecked));
+        view.Filter = o => o is QueueItemViewModel q && IsShown(q);
         QueueView = view;
+
+        _checked = new CheckedTrackStore(AppPaths.CheckedFile);
 
         _player.Volume = settings.Volume;
         _player.IsLooping = settings.RepeatOne;
@@ -169,11 +178,119 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CancelJobsCommand = new RelayCommand(CancelJobs, () => ActiveJobs > 0);
         OpenInBrowserCommand = new RelayCommand(p => OpenUrl((p as QueueItemViewModel ?? Current)?.Track.TrackUrl));
         OpenAlbumCommand = new RelayCommand(p => OpenUrl(p is QueueItemViewModel q ? TrackDetailsResolver.AlbumUrlOf(q.Track) : null));
+        CheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), true), p => Selected(p).Any(q => !q.IsChecked));
+        UncheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), false), p => Selected(p).Any(q => q.IsChecked));
+        CheckCurrentAndNextCommand = new AsyncCommand(CheckCurrentAndNextAsync, () => Current is not null);
 
         LoadQueue();
         LoadCachedCollection();
         UpdatePendingCount();
         _selectedTab = Queue.Count > 0 ? 1 : 0;
+        if (_checked.LoadError is { } error)
+        {
+            StatusText = error;
+        }
+    }
+
+    // ---- チェック済み (聴いた上で買わない) ----
+
+    /// <summary>右クリック「チェック済みにする」(選択した曲)。</summary>
+    public ICommand CheckSelectedCommand { get; }
+
+    /// <summary>右クリック「チェックを外す」(選択した曲)。</summary>
+    public ICommand UncheckSelectedCommand { get; }
+
+    /// <summary>再生中の曲をチェック済みにして次の曲へ (Ctrl+D)。</summary>
+    public ICommand CheckCurrentAndNextCommand { get; }
+
+    public int CheckedCount => _checked.Count;
+
+    public bool IsChecked(long trackId) => _checked.Contains(trackId);
+
+    public bool HideChecked
+    {
+        get => _settings.HideChecked;
+        set
+        {
+            if (_settings.HideChecked != value)
+            {
+                RememberCurrentIndex();
+                _settings.HideChecked = value;
+                _settings.Save();
+                OnPropertyChanged();
+                QueueView.Refresh();
+                OnPropertyChanged(nameof(QueueSummary));
+            }
+        }
+    }
+
+    private bool IsShown(QueueItemViewModel q) => !(HidePurchased && q.IsPurchased) && !(HideChecked && q.IsChecked);
+
+    /// <summary>チェックを付ける / 外して記録し、キューと「探す」の同じ曲の行すべてに反映する。</summary>
+    public void SetChecked(IReadOnlyCollection<QueueItemViewModel> items, bool value)
+    {
+        if (items.Count == 0)
+        {
+            return;
+        }
+
+        // 再生中の曲が隠れても、次はその続きから再生できるように位置を覚えておく
+        RememberCurrentIndex();
+
+        int changed;
+        try
+        {
+            changed = _checked.Set(items.Select(i => i.Track), value, DateTimeOffset.Now);
+        }
+        catch (IOException ex)
+        {
+            StatusText = "チェック済みの記録を保存できませんでした: " + ex.Message;
+            return;
+        }
+
+        foreach (var item in Queue.Concat(Browse.Tracks))
+        {
+            item.SetCheckedState(_checked.Contains(item.Track.TrackId));
+        }
+
+        Browse.RefreshCheckedCounts();
+        OnPropertyChanged(nameof(QueueSummary));
+        OnPropertyChanged(nameof(NowStats));
+        OnPropertyChanged(nameof(CheckedCount));
+        CommandManager.InvalidateRequerySuggested();
+
+        var first = items.First();
+        var what = items.Count == 1 ? $"「{first.Title}」" : $"{changed} 曲";
+        StatusText = value
+            ? $"{what}をチェック済みにしました (聴いた上で買わない曲。全部で {_checked.Count} 曲)" + (HideChecked ? "。「チェック済みを隠す」がオンなので一覧と再生から外れます" : "")
+            : $"{what}のチェックを外しました";
+    }
+
+    private async Task CheckCurrentAndNextAsync()
+    {
+        if (Current is not { } item)
+        {
+            return;
+        }
+
+        var preview = IsPreview;
+        SetChecked([item], true);
+        if (preview)
+        {
+            StopPlayback(); // 試聴中の曲はキューに無いので、次へは進まない
+        }
+        else
+        {
+            await NextAsync();
+        }
+    }
+
+    private void RememberCurrentIndex()
+    {
+        if (Current is not null && PlaybackList().IndexOf(Current) is var i and >= 0)
+        {
+            _currentIndexHint = i;
+        }
     }
 
     /// <summary>「探す」タブ。</summary>
@@ -272,10 +389,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         get
         {
-            var shown = HidePurchased ? Queue.Count(q => !q.IsPurchased) : Queue.Count;
+            var shown = Queue.Count(IsShown);
             var total = TimeSpan.FromSeconds(Queue.Sum(q => q.DurationSeconds));
             var text = $"{Queue.Count} 曲 ({(total.TotalHours >= 1 ? $"{(int)total.TotalHours}時間{total.Minutes}分" : $"{total.Minutes}分")})";
-            return HidePurchased && shown != Queue.Count ? $"{text} / 表示 {shown} 曲" : text;
+            var checkedInQueue = Queue.Count(q => q.IsChecked);
+            if (checkedInQueue > 0)
+            {
+                text += $" / チェック済み {checkedInQueue} 曲";
+            }
+
+            return shown != Queue.Count ? $"{text} / 表示 {shown} 曲" : text;
         }
     }
 
@@ -320,7 +443,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string NowStats => Current is null
         ? ""
         : $"サポーター {Current.TotalText} (アルバム {Current.AlbumSupText} / 曲 {Current.TrackSupText})   曲 {Current.TrackPriceText}   アルバム {Current.AlbumPriceText}"
-          + (Current.IsPurchased ? $"   {Current.PurchaseText}購入済み" : "");
+          + (Current.IsPurchased ? $"   {Current.PurchaseText}購入済み" : "")
+          + (Current.IsChecked ? "   ✓ チェック済み" : "");
 
     public string? NowArtUrl => Current?.Track.ArtId is long id ? BandcampUrls.ArtUrl(id, ArtSize.Medium) : null;
 
@@ -366,6 +490,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         {
             if (_settings.HidePurchased != value)
             {
+                RememberCurrentIndex();
                 _settings.HidePurchased = value;
                 _settings.Save();
                 OnPropertyChanged();
@@ -684,6 +809,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         item.Update(details);
         item.Purchase = TrackDetailsResolver.Purchased(item.Track, details, _ownedAlbums, _ownedTracks);
         item.IsQueued = _queuedTrackIds.Contains(item.Track.TrackId);
+        item.CheckRequested ??= (row, value) => SetChecked([row], value);
+        item.SetCheckedState(_checked.Contains(item.Track.TrackId));
         if (ReferenceEquals(item, Current))
         {
             OnPropertyChanged(nameof(NowStats));
@@ -995,7 +1122,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private async Task NextAsync()
     {
-        var next = _order.Next(PlaybackList(), Current);
+        var list = PlaybackList();
+        QueueItemViewModel? next;
+        if (!Shuffle && Current is { } current && !list.Contains(current) && _currentIndexHint >= 0 && list.Count > 0)
+        {
+            // 再生中の曲がチェックなどで表示から外れた: 外れる前の位置にいま並んでいる曲 (= 元の次の曲) へ
+            next = list[_currentIndexHint % list.Count];
+            _order.MarkPlayed(next, current);
+        }
+        else
+        {
+            next = _order.Next(list, Current);
+        }
+
         if (next is null)
         {
             StopPlayback();
@@ -1031,6 +1170,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var cts = _playCts = new CancellationTokenSource();
         _player.Stop();
         Current = item;
+        RememberCurrentIndex();
         IsPlaying = false;
         Position = 0;
         Duration = item.Track.DurationSeconds;

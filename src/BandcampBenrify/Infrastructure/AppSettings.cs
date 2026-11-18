@@ -14,6 +14,9 @@ public static class AppPaths
     public static string SettingsFile => Path.Combine(DataDir, "settings.json");
 
     public static string QueueFile => Path.Combine(DataDir, "queue.json");
+
+    /// <summary>チェック済み (聴いた上で買わない) の曲。</summary>
+    public static string CheckedFile => Path.Combine(DataDir, "checked.json");
 }
 
 /// <param name="Version">初期サイズの決め方を変えたら上げる (古い版で保存された大きさは使わない)。</param>
@@ -55,6 +58,9 @@ public sealed class AppSettings
 
     /// <summary>購入済みの曲をキューの表示 (と再生) から外す。</summary>
     public bool HidePurchased { get; set; }
+
+    /// <summary>チェック済み (聴いた上で買わない) の曲をキューの表示 (と再生) から外す。</summary>
+    public bool HideChecked { get; set; }
 
     public WindowBounds? Window { get; set; }
 

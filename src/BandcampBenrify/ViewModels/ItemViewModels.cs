@@ -135,6 +135,46 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
         PurchaseState.Track => "✓ 曲",
         _ => "",
     };
+
+    // ---- チェック済み (聴いた上で買わない) ----
+
+    private bool _isChecked;
+
+    /// <summary>チェックボックスから変えられたときに呼ばれる (記録に保存して、同じ曲の他の行にも反映する)。</summary>
+    public Action<QueueItemViewModel, bool>? CheckRequested { get; set; }
+
+    /// <summary>チェック済みか。画面から変えると <see cref="CheckRequested"/> 経由で記録される。</summary>
+    public bool IsChecked
+    {
+        get => _isChecked;
+        set
+        {
+            if (value == _isChecked)
+            {
+                return;
+            }
+
+            if (CheckRequested is { } request)
+            {
+                request(this, value);
+            }
+            else
+            {
+                SetCheckedState(value);
+            }
+        }
+    }
+
+    /// <summary>記録の状態を表示に反映する (保存はしない)。</summary>
+    public void SetCheckedState(bool value)
+    {
+        if (Set(ref _isChecked, value, nameof(IsChecked)))
+        {
+            OnPropertyChanged(nameof(CheckedSort));
+        }
+    }
+
+    public int CheckedSort => _isChecked ? 1 : 0;
 }
 
 public static class Format
