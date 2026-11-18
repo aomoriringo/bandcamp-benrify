@@ -15,7 +15,7 @@ public static class AppPaths
 
     public static string QueueFile => Path.Combine(DataDir, "queue.json");
 
-    /// <summary>チェック済み (聴いた上で買わない) の曲。</summary>
+    /// <summary>チェック済みの曲 (キューとは別に保存するので、キューから消しても残る)。</summary>
     public static string CheckedFile => Path.Combine(DataDir, "checked.json");
 }
 
@@ -59,7 +59,7 @@ public sealed class AppSettings
     /// <summary>購入済みの曲をキューの表示 (と再生) から外す。</summary>
     public bool HidePurchased { get; set; }
 
-    /// <summary>チェック済み (聴いた上で買わない) の曲をキューの表示 (と再生) から外す。</summary>
+    /// <summary>チェック済みの曲をキューの表示 (と再生) から外す。</summary>
     public bool HideChecked { get; set; }
 
     public WindowBounds? Window { get; set; }

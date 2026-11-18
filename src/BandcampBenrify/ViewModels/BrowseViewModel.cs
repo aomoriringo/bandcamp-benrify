@@ -139,7 +139,7 @@ public sealed class BrowseItemViewModel : ObservableObject
 
     private int _checkedTracks;
 
-    /// <summary>チェック済み (聴いた上で買わない) の曲数。曲目が分かっている (ページ取得済みの) 作品だけ。</summary>
+    /// <summary>チェック済みの曲数。曲目が分かっている (ページ取得済みの) 作品だけ。</summary>
     public int CheckedTracks
     {
         get => _checkedTracks;

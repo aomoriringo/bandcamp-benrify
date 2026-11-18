@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace BandcampBenrify.Core;
 
-/// <summary>「聴いた上で買わない」と決めた曲 (チェック済み) の 1 件。あとで一覧にできるよう曲名なども残す。</summary>
+/// <summary>チェック済みの曲の 1 件 (印の意味は使う人次第)。あとで一覧にできるよう曲名なども残す。</summary>
 public sealed record CheckedTrack(long TrackId, string Title, string Artist, string? AlbumTitle, string TrackUrl, DateTimeOffset CheckedAt);
 
 /// <summary>

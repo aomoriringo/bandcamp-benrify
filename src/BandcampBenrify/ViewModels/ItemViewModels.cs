@@ -136,7 +136,7 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
         _ => "",
     };
 
-    // ---- チェック済み (聴いた上で買わない) ----
+    // ---- チェック済み ----
 
     private bool _isChecked;
 

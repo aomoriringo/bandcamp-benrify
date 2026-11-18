@@ -33,11 +33,11 @@
             <Setter Property="Foreground" Value="#1F7A3F" />
             <Setter Property="FontWeight" Value="SemiBold" />
         </Style>
-        <!-- 「チェック済み (聴いた上で買わない)」のチェックボックス (キュー・探す の曲目 共通) -->
+        <!-- 「チェック済み」のチェックボックス (キュー・探す の曲目 共通) -->
         <DataTemplate x:Key="CheckedCellTemplate" DataType="vm:QueueItemViewModel">
             <CheckBox IsChecked="{Binding IsChecked, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"
                       Focusable="False" AutomationProperties.Name="チェック済み"
-                      ToolTip="チェック済み: 聴いた上で買わないと決めた曲 (Bandcamp には送られず、このアプリにだけ記録されます)" />
+                      ToolTip="チェック済みの印 (このアプリにだけ記録されます。キューから削除しても残ります)" />
         </DataTemplate>
         <Style x:Key="SortableHeader" TargetType="{x:Type DataGridColumnHeader}">
             <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -139,7 +139,7 @@
                         <Button x:Name="NextButton" AutomationProperties.Name="次へ" Style="{StaticResource IconButton}" Content="&#xE893;" Command="{Binding NextCommand}" ToolTip="次へ (Ctrl+→)" />
                         <Button x:Name="CheckNextButton" AutomationProperties.Name="チェックして次へ" Style="{StaticResource IconButton}" Content="&#xE73E;" Margin="8,0,0,0"
                                 Command="{Binding CheckCurrentAndNextCommand}"
-                                ToolTip="今の曲をチェック済み (聴いた上で買わない) にして次の曲へ (Ctrl+D)" />
+                                ToolTip="今の曲をチェック済みにして次の曲へ (Ctrl+D)" />
                     </StackPanel>
                     <TextBlock Text="{Binding PlayModeText}" HorizontalAlignment="Center" FontSize="11" Foreground="{StaticResource MutedText}" />
                 </StackPanel>
@@ -195,7 +195,7 @@
                                      ToolTip="タイトル・アーティストで一覧を絞り込みます (Bandcamp には問い合わせません)" />
                             <CheckBox Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="12,0,0,0" />
                             <CheckBox Content="チェック済みを隠す" IsChecked="{Binding HideChecked}" VerticalAlignment="Center" Margin="12,0,0,0"
-                                      ToolTip="全曲チェック済み (聴いた上で買わない) の作品を一覧から隠します" />
+                                      ToolTip="全曲チェック済みの作品を一覧から隠します" />
                         </StackPanel>
                     </DockPanel>
 
@@ -327,7 +327,7 @@
                                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                         <MenuItem Header="曲の情報を取得" Command="{Binding PlacementTarget.DataContext.FetchTrackInfoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                        <MenuItem Header="チェック済みにする (聴いた・買わない)" Command="{Binding PlacementTarget.DataContext.CheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                        <MenuItem Header="チェック済みにする" Command="{Binding PlacementTarget.DataContext.CheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                         <MenuItem Header="チェックを外す" Command="{Binding PlacementTarget.DataContext.UncheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
@@ -362,7 +362,7 @@
                     <CheckBox x:Name="HidePurchasedCheck" Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="16,0,0,0"
                               ToolTip="購入済みの曲を一覧と再生対象から外します (コレクションの読み込みが必要)" />
                     <CheckBox x:Name="HideCheckedCheck" Content="チェック済みを隠す" IsChecked="{Binding HideChecked}" VerticalAlignment="Center" Margin="12,0,0,0"
-                              ToolTip="チェック済み (聴いた上で買わない) の曲を一覧と再生対象から外します" />
+                              ToolTip="チェック済みの曲を一覧と再生対象から外します" />
                     <Button x:Name="ResetSortButton" Content="追加順に戻す" Click="ResetSort_Click" ToolTip="列の並び替えを解除して、キューに追加した順に戻します" Margin="12,0,0,0" />
                     <Button Content="すべて削除" Command="{Binding ClearQueueCommand}" Margin="6,0,0,0" />
                     <TextBlock Text="{Binding QueueSummary}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="{StaticResource MutedText}" />
@@ -396,7 +396,7 @@
                     <ContextMenu>
                         <MenuItem Header="再生" Command="{Binding PlacementTarget.DataContext.PlayItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                        <MenuItem Header="チェック済みにする (聴いた・買わない)" Command="{Binding PlacementTarget.DataContext.CheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                        <MenuItem Header="チェック済みにする" Command="{Binding PlacementTarget.DataContext.CheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                         <MenuItem Header="チェックを外す" Command="{Binding PlacementTarget.DataContext.UncheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />

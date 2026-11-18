@@ -192,7 +192,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    // ---- チェック済み (聴いた上で買わない) ----
+    // ---- チェック済み (使い道はユーザー次第の、曲ごとの印) ----
 
     /// <summary>右クリック「チェック済みにする」(選択した曲)。</summary>
     public ICommand CheckSelectedCommand { get; }
@@ -262,7 +262,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var first = items.First();
         var what = items.Count == 1 ? $"「{first.Title}」" : $"{changed} 曲";
         StatusText = value
-            ? $"{what}をチェック済みにしました (聴いた上で買わない曲。全部で {_checked.Count} 曲)" + (HideChecked ? "。「チェック済みを隠す」がオンなので一覧と再生から外れます" : "")
+            ? $"{what}をチェック済みにしました (全部で {_checked.Count} 曲)" + (HideChecked ? "。「チェック済みを隠す」がオンなので一覧と再生から外れます" : "")
             : $"{what}のチェックを外しました";
     }
 
