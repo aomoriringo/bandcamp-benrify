@@ -595,20 +595,66 @@ public sealed class BrowseViewModel : ObservableObject
                            + (tracks.Count > playable.Count ? $" ({tracks.Count - playable.Count} 曲は試聴不可のため除外)" : "");
     }
 
+    /// <summary>
+    /// 選んだ作品の全曲をキューに追加する。取得済みの作品はすぐに、未取得の作品はページが届いたものから順に追加する
+    /// (1 作品 1 リクエストで間隔を空けるので、件数が多いと時間がかかる。進み具合はジョブ欄に出す)。
+    /// </summary>
     private async Task AddReleasesAsync(IReadOnlyList<BrowseItemViewModel> releases)
     {
-        var tracks = new List<TrackInfo>();
-        foreach (var r in releases)
+        var ordered = releases.OrderBy(r => r.Page is null ? 1 : 0).ToList();
+        var toFetch = ordered.Count(r => r.Page is null);
+        var ct = _host.BeginJob($"{releases.Count} 作品をキューに追加中…");
+        var added = 0;
+        var found = 0;
+        var fetched = 0;
+        var errors = 0;
+        try
         {
-            var page = r.Page ?? await _client.GetTralbumAsync(r.Url, RequestPriority.Interactive);
-            r.Page ??= page;
-            tracks.AddRange(page.Tracks.Where(t => t.StreamUrl is not null));
-        }
+            foreach (var r in ordered)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (r.Page is null)
+                {
+                    var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (toFetch - fetched));
+                    _host.ReportJob(
+                        $"選んだ作品をキューに追加中: ページを取得 {fetched}/{toFetch} (残り約 {Format.Eta(eta)}) — {added} 曲追加済み: {r.Title}",
+                        toFetch > 0 ? (double)fetched / toFetch : -1);
+                    try
+                    {
+                        r.Page = await _client.GetTralbumAsync(r.Url, RequestPriority.Interactive, ct: ct);
+                        Refresh(r);
+                    }
+                    catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
+                    {
+                        r.Error = ex.Message;
+                        errors++;
+                        continue;
+                    }
+                    finally
+                    {
+                        fetched++;
+                    }
+                }
 
-        var added = _host.AddTracks(tracks);
-        _host.SaveQueue();
-        UpdatePendingCount();
-        _host.StatusText = $"{releases.Count} 作品から {added} 曲をキューに追加しました" + (tracks.Count > added ? $" ({tracks.Count - added} 曲は追加済み)" : "");
+                var tracks = r.Page!.Tracks.Where(t => t.StreamUrl is not null).ToList();
+                found += tracks.Count;
+                added += _host.AddTracks(tracks);
+            }
+
+            _host.StatusText = $"{releases.Count} 作品から {added} 曲をキューに追加しました"
+                               + (found > added ? $" ({found - added} 曲は追加済み)" : "")
+                               + (errors > 0 ? $" (取得に失敗した作品: {errors})" : "");
+        }
+        catch (OperationCanceledException)
+        {
+            _host.StatusText = $"追加を中止しました ({added} 曲追加済み)";
+        }
+        finally
+        {
+            _host.EndJob();
+            _host.SaveQueue();
+            UpdatePendingCount();
+        }
     }
 
     private static List<BrowseItemViewModel> SelectedReleases(object? p) =>
