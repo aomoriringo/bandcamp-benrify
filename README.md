@@ -155,6 +155,14 @@ $env:BENRIFY_DATA_DIR = "$PWD\devdata"; dotnet run --project src/BandcampBenrify
 
 GitHub Actions でも push ごとにテストと単体 exe のビルドを行い、成果物 (Artifacts) としてダウンロードできます。
 
+### バージョン
+
+[セマンティックバージョニング](https://semver.org/lang/ja/) (MAJOR.MINOR.PATCH) で付けます。まだ 1.0 前なので 0.x です。
+
+- 番号は `Directory.Build.props` の `<Version>` だけで決まり、exe・User-Agent・設定画面の表示に使われます
+- 機能を足したら MINOR (0.1.0 → 0.2.0)、不具合の修正だけなら PATCH (0.1.0 → 0.1.1) を上げます
+- リリースした版には `v0.1.0` の形で git のタグを付けます
+
 ## 設定とデータ
 
 アプリの「設定」で、テーマカラー・プロフィール・リクエスト間隔・キャッシュ削除ができます。

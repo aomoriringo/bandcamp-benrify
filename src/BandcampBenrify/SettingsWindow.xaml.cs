@@ -22,6 +22,7 @@ public partial class SettingsWindow : Window
     {
         InitializeComponent();
         _vm = vm;
+        VersionText.Text = $"Bandcamp Benrify v{typeof(App).Assembly.GetName().Version?.ToString(3)}";
         ProfileBox.Text = string.IsNullOrEmpty(vm.Settings.BandcampUsername) ? "" : $"https://bandcamp.com/{vm.Settings.BandcampUsername}";
         IntervalBox.Text = vm.Settings.RequestIntervalSeconds.ToString("0.0", CultureInfo.InvariantCulture);
         UpdateCacheText();
