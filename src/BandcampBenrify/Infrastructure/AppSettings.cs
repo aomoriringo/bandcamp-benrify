@@ -1,5 +1,6 @@
 using System.IO;
 using System.Text.Json;
+using BandcampBenrify.Core;
 
 namespace BandcampBenrify.Infrastructure;
 
@@ -84,8 +85,7 @@ public sealed class AppSettings
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.DataDir);
-            File.WriteAllText(AppPaths.SettingsFile, JsonSerializer.Serialize(this, JsonOptions));
+            SafeFile.WriteAllTextAtomic(AppPaths.SettingsFile, JsonSerializer.Serialize(this, JsonOptions));
         }
         catch (IOException)
         {

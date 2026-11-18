@@ -76,18 +76,14 @@ public sealed class CheckedTrackStore
         catch (JsonException ex)
         {
             // 上書きして失わないように、壊れたファイルは残しておく
-            var backup = _path + $".broken-{DateTime.Now:yyyyMMddHHmmss}";
-            File.Move(_path, backup);
-            LoadError = $"チェック済みの記録を読み込めなかったので {Path.GetFileName(backup)} に退避しました ({ex.Message})";
+            var backup = SafeFile.MoveAside(_path, DateTime.Now);
+            LoadError = $"チェック済みの記録を読み込めなかったので {backup} に退避しました ({ex.Message})";
         }
     }
 
     private void Save()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + ".tmp";
         var list = _items.Values.OrderBy(i => i.CheckedAt).ToList();
-        File.WriteAllText(temp, JsonSerializer.Serialize(list, JsonOptions));
-        File.Move(temp, _path, overwrite: true);
+        SafeFile.WriteAllTextAtomic(_path, JsonSerializer.Serialize(list, JsonOptions));
     }
 }

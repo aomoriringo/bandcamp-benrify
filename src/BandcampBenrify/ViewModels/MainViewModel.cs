@@ -186,7 +186,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         LoadCachedCollection();
         UpdatePendingCount();
         _selectedTab = Queue.Count > 0 ? 1 : 0;
-        if (_checked.LoadError is { } error)
+        if (string.Join(" / ", new[] { _queueLoadError, _checked.LoadError }.OfType<string>()) is { Length: > 0 } error)
         {
             StatusText = error;
         }
@@ -1348,32 +1348,64 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     // ---- 永続化 ----
 
+    /// <summary>キューのファイルを読めなかったときのメッセージ (起動時に表示する)。</summary>
+    private string? _queueLoadError;
+
+    /// <summary>読めなかったファイルを退避できなかったとき。空のキューで上書きしないよう保存を止める。</summary>
+    private bool _queueSaveBlocked;
+
     private void LoadQueue()
     {
+        if (!File.Exists(AppPaths.QueueFile))
+        {
+            return;
+        }
+
         try
         {
-            if (File.Exists(AppPaths.QueueFile))
+            var tracks = JsonSerializer.Deserialize<List<TrackInfo>>(File.ReadAllText(AppPaths.QueueFile)) ?? [];
+            AddTracks(tracks);
+        }
+        catch (JsonException ex)
+        {
+            // 壊れたファイルは別名で残しておく (このあとの保存で上書きして失わないように)
+            try
             {
-                var tracks = JsonSerializer.Deserialize<List<TrackInfo>>(File.ReadAllText(AppPaths.QueueFile)) ?? [];
-                AddTracks(tracks);
+                var backup = SafeFile.MoveAside(AppPaths.QueueFile, DateTime.Now);
+                _queueLoadError = $"キューを読み込めなかったので {backup} に退避しました ({ex.Message})";
+            }
+            catch (IOException)
+            {
+                BlockQueueSave(ex.Message);
             }
         }
-        catch (Exception ex) when (ex is IOException or JsonException)
+        catch (IOException ex)
         {
-            StatusText = "キューの読み込みに失敗しました: " + ex.Message;
+            BlockQueueSave(ex.Message);
         }
+    }
+
+    private void BlockQueueSave(string reason)
+    {
+        _queueSaveBlocked = true;
+        _queueLoadError = $"キューを読み込めませんでした ({reason})。元のファイルを上書きしないよう、キューの変更は保存しません。アプリを再起動してください";
     }
 
     public void SaveQueue()
     {
+        if (_queueSaveBlocked)
+        {
+            return;
+        }
+
         try
         {
-            Directory.CreateDirectory(AppPaths.DataDir);
             var tracks = Queue.OrderBy(q => q.Seq).Select(q => q.Track with { StreamUrl = null }).ToList();
-            File.WriteAllText(AppPaths.QueueFile, JsonSerializer.Serialize(tracks));
+            SafeFile.WriteAllTextAtomic(AppPaths.QueueFile, JsonSerializer.Serialize(tracks));
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            StatusText = "キューを保存できませんでした: " + ex.Message;
         }
     }
 

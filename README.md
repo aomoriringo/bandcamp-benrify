@@ -159,6 +159,8 @@ GitHub Actions でも push ごとにテストと単体 exe のビルドを行い
 | `%APPDATA%\BandcampBenrify\checked.json` | チェック済みの曲 (キューを消しても残ります) |
 | `%LOCALAPPDATA%\BandcampBenrify\cache` | 取得したページ・コレクションのキャッシュ (消しても問題ありません) |
 
+キュー・チェック済み・設定は、一時ファイルに書いてから置き換えるので、保存中に PC が落ちても前回の内容が残ります。キューやチェック済みのファイルが読み込めなかったときは `queue.json.broken-日時` のような名前で残してから空の状態で始めるので、中身を確かめて元の名前に戻せば復元できます。
+
 `settings.json` だけで設定できる項目: `PageCacheHours` (72)、`DiscographyCacheHours` (12)、`SupportersMaxRequestsPerItem` (30)、`LocalApiPort` (47823、0 で拡張用 API を無効)
 
 ## 構成
