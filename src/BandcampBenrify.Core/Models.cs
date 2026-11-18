@@ -113,6 +113,10 @@ public sealed record SupporterInfo
     public bool MoreThumbs { get; init; }
     public bool MoreReviews { get; init; }
 
+    /// <summary>続きを数えるためのトークン (最後に数えたファンのもの)。</summary>
+    public string? LastThumbToken { get; init; }
+    public string? LastReviewToken { get; init; }
+
     public int Count => FanIds.Count;
 
     /// <summary>ページに載りきらないサポーターがいる (実際は Count より多い)。</summary>

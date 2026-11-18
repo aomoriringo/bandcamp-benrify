@@ -92,7 +92,8 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
 
     public double TrackSupSort => _details.TrackSupporters?.SortKey ?? -1;
 
-    public bool NeedsDetails => !_details.IsComplete;
+    /// <summary>取得していないページがあるか、サポーター数が「N+」のままか。</summary>
+    public bool NeedsDetails => !_details.IsComplete || _details.TotalHasMore;
 
     // ---- 値段 ----
 

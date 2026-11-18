@@ -83,9 +83,120 @@ public sealed class BandcampClient
     {
         var result = await _http.GetAsync(url, priority, ct).ConfigureAwait(false);
         var page = BandcampParser.ParseTralbum(result.Body, result.FinalUri.ToString(), _now());
+
+        // 以前に「もっと見る」で数えたサポーターは、ページを取り直しても失わないよう引き継ぐ
+        if (TryGetCachedTralbum(url)?.Supporters is { } previous && previous.Count > page.Supporters.Count)
+        {
+            page = page with { Supporters = MergeSupporters(page.Supporters, previous) };
+        }
+
         Store(url, page);
         return page;
     }
+
+    /// <summary>新しく取ったページのサポーター (新しい人が先頭) に、以前数えた分を足す。続きのトークンは以前のものを使う。</summary>
+    private static SupporterInfo MergeSupporters(SupporterInfo fresh, SupporterInfo previous)
+    {
+        var ids = new List<long>(fresh.FanIds);
+        var seen = new HashSet<long>(ids);
+        ids.AddRange(previous.FanIds.Where(seen.Add));
+        return previous with { FanIds = ids };
+    }
+
+    /// <summary>
+    /// ページに載りきらない (「N+」の) サポーターを、Bandcamp の「もっと見る」と同じ API で続きから数える。
+    /// 最大 <paramref name="maxRequests"/> 回で打ち切り、途中経過を保存するので、次に呼ぶと続きから数える。
+    /// </summary>
+    /// <param name="progress">リクエストごとに、その時点の人数を通知する。</param>
+    public async Task<TralbumPage> CountSupportersAsync(TralbumPage page, int maxRequests, IProgress<int>? progress = null, CancellationToken ct = default)
+    {
+        var s = page.Supporters;
+        if (!s.HasMore)
+        {
+            return page;
+        }
+
+        // 古い形式のキャッシュには続きを数えるためのトークンが無いので、ページを 1 回取り直す
+        if ((s.MoreThumbs && s.LastThumbToken is null) || (s.MoreReviews && s.LastReviewToken is null))
+        {
+            page = await GetTralbumAsync(page.Url, RequestPriority.Background, forceRefresh: true, ct).ConfigureAwait(false);
+            s = page.Supporters;
+            if (!s.HasMore)
+            {
+                return page;
+            }
+        }
+
+        var origin = BandcampUrls.Origin(page.Url);
+        var ids = new List<long>(s.FanIds);
+        var seen = new HashSet<long>(ids);
+        var budget = maxRequests;
+        var (thumbToken, moreThumbs) = (s.LastThumbToken, s.MoreThumbs);
+        var (reviewToken, moreReviews) = (s.LastReviewToken, s.MoreReviews);
+
+        TralbumPage Snapshot() => page with
+        {
+            Supporters = s with
+            {
+                FanIds = [.. ids],
+                LastThumbToken = thumbToken,
+                MoreThumbs = moreThumbs,
+                LastReviewToken = reviewToken,
+                MoreReviews = moreReviews,
+            },
+        };
+
+        try
+        {
+            (thumbToken, moreThumbs) = await PageAsync("thumbs", thumbToken, moreThumbs).ConfigureAwait(false);
+            (reviewToken, moreReviews) = await PageAsync("reviews", reviewToken, moreReviews).ConfigureAwait(false);
+        }
+        finally
+        {
+            // 中止・失敗しても、そこまで数えた分は保存する
+            Store(BandcampUrls.Normalize(page.Url), Snapshot());
+        }
+
+        return Snapshot();
+
+        async Task<(string? Token, bool More)> PageAsync(string kind, string? token, bool more)
+        {
+            while (more && token is not null && budget > 0)
+            {
+                budget--;
+                var body = JsonSerializer.Serialize(new
+                {
+                    tralbum_type = page.Type == ItemType.Album ? "a" : "t",
+                    tralbum_id = page.Id,
+                    token,
+                    count = SupportersPageSize,
+                });
+                var result = await _http.PostJsonAsync($"{origin}/api/tralbumcollectors/2/{kind}", body, RequestPriority.Background, ct).ConfigureAwait(false);
+                var before = ids.Count;
+                var (next, moreAvailable) = BandcampParser.ParseCollectorsPage(result.Body, ids, seen);
+                progress?.Report(ids.Count);
+                if (ids.Count == before)
+                {
+                    return (token, false); // 進まなければ終わり (同じ所を何度も取らない)
+                }
+
+                (token, more) = (next ?? token, moreAvailable);
+                if (kind == "thumbs")
+                {
+                    (thumbToken, moreThumbs) = (token, more);
+                }
+                else
+                {
+                    (reviewToken, moreReviews) = (token, more);
+                }
+            }
+
+            return (token, more);
+        }
+    }
+
+    /// <summary>サポーター一覧の 1 リクエストあたりの件数。</summary>
+    public int SupportersPageSize { get; set; } = 100;
 
     private void Store(string requestedUrl, TralbumPage page)
     {

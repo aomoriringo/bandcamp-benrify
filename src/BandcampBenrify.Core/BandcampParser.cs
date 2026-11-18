@@ -278,20 +278,23 @@ public static partial class BandcampParser
         var root = json.RootElement;
         var ids = new List<long>();
         var seen = new HashSet<long>();
-        CollectFans(root, "thumbs", ids, seen);
-        CollectFans(root, "reviews", ids, seen);
+        var lastThumb = CollectFans(root, "thumbs", ids, seen);
+        var lastReview = CollectFans(root, "reviews", ids, seen);
 
         return new SupporterInfo
         {
             FanIds = ids,
             MoreThumbs = GetBool(root, "more_thumbs_available") ?? false,
             MoreReviews = GetBool(root, "more_reviews_available") ?? false,
+            LastThumbToken = lastThumb,
+            LastReviewToken = lastReview,
         };
     }
 
-    /// <summary>thumbs / reviews 配列から fan_id を重複なく集める。</summary>
-    private static void CollectFans(JsonElement root, string property, List<long> ids, HashSet<long> seen)
+    /// <summary>thumbs / reviews / results 配列から fan_id を重複なく集め、最後のファンのトークンを返す。</summary>
+    public static string? CollectFans(JsonElement root, string property, List<long> ids, HashSet<long> seen)
     {
+        string? lastToken = null;
         if (root.TryGetProperty(property, out var arr) && arr.ValueKind == JsonValueKind.Array)
         {
             foreach (var fan in arr.EnumerateArray())
@@ -300,8 +303,26 @@ public static partial class BandcampParser
                 {
                     ids.Add(fanId);
                 }
+
+                lastToken = GetString(fan, "token") ?? lastToken;
             }
         }
+
+        return lastToken;
+    }
+
+    /// <summary>サポーター一覧の続き (tralbumcollectors API の応答) を解析する。</summary>
+    public static (string? LastToken, bool MoreAvailable) ParseCollectorsPage(string json, List<long> ids, HashSet<long> seen)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (GetBool(root, "error") == true)
+        {
+            throw new BandcampParseException(GetString(root, "error_message") ?? "サポーター一覧の取得に失敗しました");
+        }
+
+        var token = CollectFans(root, "results", ids, seen);
+        return (token, GetBool(root, "more_available") ?? false);
     }
 
     /// <summary>アーティスト / レーベルの /music ページを解析する。</summary>

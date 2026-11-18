@@ -35,6 +35,12 @@ public sealed class AppSettings
     /// <summary>作品一覧のキャッシュ有効時間。</summary>
     public double DiscographyCacheHours { get; set; } = 12;
 
+    /// <summary>
+    /// 正確なサポーター数を数えるときの 1 作品あたりのリクエスト上限 (1 回 100 人)。
+    /// 上限に達した作品は「N+」のまま途中経過を保存し、次回は続きから数える。
+    /// </summary>
+    public int SupportersMaxRequestsPerItem { get; set; } = 30;
+
     /// <summary>Chrome 拡張から操作を受け付けるポート (localhost のみ)。0 で無効。</summary>
     public int LocalApiPort { get; set; } = 47823;
 

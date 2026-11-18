@@ -19,6 +19,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private const int MaxConsecutiveFailures = 5;
 
+    /// <summary>これ以上のリクエストになりそうなら、実行前に確認する。</summary>
+    private const int ConfirmRequestThreshold = 300;
+
     private readonly AppSettings _settings;
     private readonly ThrottledHttpClient _http;
     private readonly DiskCache _cache;
@@ -161,7 +164,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }, () => Queue.Count > 0);
         FetchDetailsCommand = new AsyncCommand(
             p => FetchDetailsAsync(Selected(p) is { Count: > 0 } sel ? sel : QueueView.Cast<QueueItemViewModel>().ToList()),
-            _ => PendingPageCount > 0 && !_fetchingDetails);
+            _ => (PendingPageCount > 0 || PendingPlusCount > 0) && !_fetchingDetails);
         RefreshCollectionCommand = new AsyncCommand(RefreshCollectionAsync, () => HasProfile && !_loadingCollection);
         CancelJobsCommand = new RelayCommand(CancelJobs, () => ActiveJobs > 0);
         OpenInBrowserCommand = new RelayCommand(p => OpenUrl((p as QueueItemViewModel ?? Current)?.Track.TrackUrl));
@@ -732,27 +735,66 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _pendingTimer.Stop();
         PendingPageCount = Queue.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().Count();
-        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * PendingPageCount);
-        DetailsButtonText = PendingPageCount == 0
+        PendingPlusCount = PagesWithMoreSupporters(Queue).Count;
+        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (PendingPageCount + PendingPlusCount));
+        var parts = new List<string>();
+        if (PendingPageCount > 0)
+        {
+            parts.Add($"未取得 {PendingPageCount} ページ");
+        }
+
+        if (PendingPlusCount > 0)
+        {
+            parts.Add($"人数未確定 {PendingPlusCount} 作品");
+        }
+
+        DetailsButtonText = parts.Count == 0
             ? "曲の情報: すべて取得済み"
-            : $"曲の情報を取得 (未取得 {PendingPageCount} ページ・約 {Format.Eta(eta)})";
+            : $"曲の情報を取得 ({string.Join("・", parts)}・約 {Format.Eta(eta)}{(PendingPlusCount > 0 ? "〜" : "")})";
         OnPropertyChanged(nameof(PendingPageCount));
+        OnPropertyChanged(nameof(PendingPlusCount));
         CommandManager.InvalidateRequerySuggested();
     }
+
+    /// <summary>サポーターがページに載りきらず「N+」になっているページ (アルバム / 曲)。</summary>
+    private static List<TralbumPage> PagesWithMoreSupporters(IEnumerable<QueueItemViewModel> items) =>
+        items.SelectMany(q => new[] { q.Details.AlbumPage, q.Details.TrackPage })
+            .OfType<TralbumPage>()
+            .Where(p => p.Supporters.HasMore)
+            .DistinctBy(p => BandcampUrls.Normalize(p.Url))
+            .ToList();
+
+    /// <summary>「N+」の作品の数 (正確な人数を数える対象)。</summary>
+    public int PendingPlusCount { get; private set; }
 
     public bool IsFetchingDetails => _fetchingDetails;
 
     /// <summary>
-    /// 曲ページ (曲単体のサポーター数・値段) と、未取得のアルバムページを取得する。1 ページ 1 リクエスト。
+    /// 曲ページ (曲単体のサポーター数・値段) と未取得のアルバムページを取得し (1 ページ 1 リクエスト)、
+    /// そのあと「N+」になっている作品のサポーターを「もっと見る」と同じ方法で数える (100 人 1 リクエスト、1 作品あたり上限あり)。
     /// キューからも「探す」からも使う。
     /// </summary>
     public async Task FetchDetailsAsync(IReadOnlyList<QueueItemViewModel> targets)
     {
         var urls = targets.SelectMany(q => q.Details.MissingPages(q.Track)).Select(BandcampUrls.Normalize).Distinct().ToList();
-        if (urls.Count == 0)
+        var plusCount = PagesWithMoreSupporters(targets).Count;
+        if (urls.Count == 0 && plusCount == 0)
         {
             StatusText = "曲の情報はすべて取得済みです";
             return;
+        }
+
+        // 量が多いときは確認する (人数を数える分は 1 作品 1 回以上なので最低限の見積もり)
+        var estimate = urls.Count + plusCount;
+        if (estimate > ConfirmRequestThreshold)
+        {
+            var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * estimate);
+            if (MessageBox.Show(
+                    $"{urls.Count} ページの取得と {plusCount} 作品のサポーター集計で、少なくとも {estimate} 回 Bandcamp にアクセスします (約 {Format.Eta(eta)} 以上)。\n途中で中止でき、取得した分は保存されます。続けますか？",
+                    "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
+            {
+                return;
+            }
         }
 
         var seen = new HashSet<string>(urls);
@@ -795,11 +837,44 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 }
             }
 
-            StatusText = $"{done} ページの情報を取得しました" + (errors > 0 ? $" (失敗 {errors})" : "");
+            // 「N+」の作品の正確なサポーター数を数える
+            var plusPages = PagesWithMoreSupporters(targets);
+            var counted = 0;
+            var capped = 0;
+            foreach (var page in plusPages)
+            {
+                ct.ThrowIfCancellationRequested();
+                var label = $"正確なサポーター数を集計中 {counted}/{plusPages.Count} 作品: {page.Title}";
+                ReportJob(label, (double)counted / plusPages.Count);
+                var progress = new Progress<int>(n => ReportJob($"{label} ({n} 人まで数えました)", (double)counted / plusPages.Count));
+                try
+                {
+                    var result = await _client.CountSupportersAsync(page, _settings.SupportersMaxRequestsPerItem, progress, ct);
+                    if (result.Supporters.HasMore)
+                    {
+                        capped++;
+                    }
+                }
+                catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
+                {
+                    errors++;
+                    Debug.WriteLine($"{page.Url}: {ex.Message}");
+                }
+
+                counted++;
+                OnPageFetched(page.Url);
+            }
+
+            StatusText = (done > 0 ? $"{done} ページを取得" : "")
+                         + (done > 0 && counted > 0 ? "、" : "")
+                         + (counted > 0 ? $"{counted} 作品のサポーター数を集計" : "")
+                         + "しました"
+                         + (capped > 0 ? $" (サポーターが特に多い {capped} 作品は上限まで数えたので「+」のまま。もう一度押すと続きから数えます)" : "")
+                         + (errors > 0 ? $" (失敗 {errors})" : "");
         }
         catch (OperationCanceledException)
         {
-            StatusText = $"取得を中止しました ({done}/{urls.Count})";
+            StatusText = "取得を中止しました (取得・集計した分は保存されています)";
         }
         finally
         {

@@ -335,8 +335,8 @@
             <DockPanel Margin="0,8,0,0">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
                     <Button x:Name="FetchDetailsButton" Content="{Binding DetailsButtonText}" Margin="0"
-                            Command="{Binding FetchDetailsCommand}" CommandParameter="{Binding SelectedItems, ElementName=QueueGrid}"
-                            ToolTip="曲ページを取得して、曲単体のサポーター数と値段を調べます (1 曲 1 リクエスト)。&#10;曲を選択していれば選択した曲だけ、していなければ表示中の曲を上から順に取得します。" />
+                            Command="{Binding FetchDetailsCommand}"
+                            ToolTip="曲ページを取得して、曲単体のサポーター数と値段を調べます (1 曲 1 リクエスト)。&#10;表示中の曲を上から順にすべて取得します (選んだ曲だけ取得するときは右クリック)。" />
                     <CheckBox x:Name="HidePurchasedCheck" Content="購入済みを隠す" IsChecked="{Binding HidePurchased}" VerticalAlignment="Center" Margin="16,0,0,0"
                               ToolTip="購入済みの曲を一覧と再生対象から外します (コレクションの読み込みが必要)" />
                     <Button x:Name="ResetSortButton" Content="追加順に戻す" Click="ResetSort_Click" ToolTip="列の並び替えを解除して、キューに追加した順に戻します" Margin="12,0,0,0" />
