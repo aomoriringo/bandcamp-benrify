@@ -11,7 +11,15 @@ Bandcamp を便利に聴くための Windows アプリです。
 - **値段**: 曲単体とアルバムのデジタル版の値段 (最低価格) を表示
 - **Chrome 拡張 (任意)**: Bandcamp のページ上で右クリック → 「Benrify の「探す」で開く」「Benrify のキューに追加」
 
-## インストール
+## ダウンロードして使う
+
+[Releases](https://github.com/aomoriringo/bandcamp-benrify/releases/latest) から **BandcampBenrify.exe** をダウンロードして、そのまま実行してください。インストールや .NET の準備は要りません (Windows 10 (19041) 以降、64 ビット)。
+
+- 初めて実行するとき「Windows によって PC が保護されました」と出ることがあります (署名していないため)。「詳細情報」→「実行」で起動できます
+- 設定・キュー・キャッシュは `%LOCALAPPDATA%\BandcampBenrify` に保存されます。新しい版にするときは exe を置き換えるだけで、そのまま引き継がれます
+- Chrome 拡張を使う場合は、同じページの **BandcampBenrify-chrome-extension.zip** を展開して、[Chrome 拡張のインストール](#chrome-拡張のインストール-任意) の手順で読み込みます
+
+## ソースからインストール
 
 [.NET 10 SDK](https://dotnet.microsoft.com/download) を入れた Windows 10 (19041) 以降で、リポジトリのフォルダで次を実行します (管理者権限は不要)。
 
@@ -136,7 +144,7 @@ URL を貼って「キューに追加」(Ctrl+Enter) で、選ばずにそのま
 ## Chrome 拡張のインストール (任意)
 
 1. Chrome で `chrome://extensions` を開き、右上の **デベロッパー モード** をオンにする
-2. **パッケージ化されていない拡張機能を読み込む** で、このリポジトリの `extension` フォルダを選ぶ
+2. **パッケージ化されていない拡張機能を読み込む** で、このリポジトリの `extension` フォルダ (Releases の zip を展開したフォルダ) を選ぶ
 3. Bandcamp のページやリンク (検索結果を含む) を右クリック → 「Benrify の「探す」で開く」または「Benrify のキューに追加」 (ツールバーのアイコンからも可)
 
 拡張はアプリが `http://localhost:47823` で待ち受けている API に URL を渡すだけです。Bandcamp への取得はアプリ側が上記のルールで行います。
@@ -161,7 +169,7 @@ GitHub Actions でも push ごとにテストと単体 exe のビルドを行い
 
 - 番号は `Directory.Build.props` の `<Version>` だけで決まり、exe・User-Agent・設定画面の表示に使われます
 - 機能を足したら MINOR (0.1.0 → 0.2.0)、不具合の修正だけなら PATCH (0.1.0 → 0.1.1) を上げます
-- リリースした版には `v0.1.0` の形で git のタグを付けます
+- リリースするときは `v0.1.0` の形で git のタグを付けて push します。GitHub Actions がテスト・単体 exe のビルドをして Releases に載せます (タグと `<Version>` が違うと止まります)
 
 ## 設定とデータ
 
