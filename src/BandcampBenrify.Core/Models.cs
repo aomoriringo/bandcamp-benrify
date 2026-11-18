@@ -32,6 +32,9 @@ public sealed record TrackInfo
     /// <summary>mp3-128 のストリームURL。有効期限付きなので再生直前に <see cref="StreamUrls.IsExpired"/> で確認する。</summary>
     public string? StreamUrl { get; init; }
 
+    /// <summary>レーベル名。自主リリースは ""、古いデータで不明なら null。</summary>
+    public string? Label { get; init; }
+
     /// <summary>この曲が収録されているアルバムの ID / URL (単独リリースの曲は null)。</summary>
     public long? AlbumId { get; init; }
 
@@ -143,6 +146,13 @@ public sealed record TralbumPage
 
     /// <summary>デジタル版の値段。単品で買えない曲などは null。</summary>
     public PriceInfo? Price { get; init; }
+
+    /// <summary>
+    /// レーベル名。アーティストのページで売られている作品は JSON-LD の recordLabel、
+    /// レーベルのページで売られている作品はページの持ち主 (publisher)。自主リリースは ""。
+    /// 古い版で保存したキャッシュでは null (不明)。
+    /// </summary>
+    public string? Label { get; init; }
 
     /// <summary>曲ページの場合、収録アルバムの ID / URL。</summary>
     public long? AlbumId { get; init; }

@@ -55,6 +55,8 @@ public static partial class BandcampParser
             albumId = null;
         }
 
+        var label = ParseLabel(doc);
+
         var tracks = new List<TrackInfo>();
         if (root.TryGetProperty("trackinfo", out var trackinfo) && trackinfo.ValueKind == JsonValueKind.Array)
         {
@@ -89,6 +91,7 @@ public static partial class BandcampParser
                     StreamUrl = stream,
                     AlbumId = albumId,
                     AlbumUrl = albumUrl,
+                    Label = label,
                 });
             }
         }
@@ -105,6 +108,7 @@ public static partial class BandcampParser
             Tracks = tracks,
             Supporters = ParseSupporters(doc),
             Price = ParsePrice(doc, url, current),
+            Label = label,
             AlbumId = type == ItemType.Track ? albumId : null,
             AlbumUrl = type == ItemType.Track ? albumUrl : null,
             FetchedAt = fetchedAt,
@@ -139,6 +143,71 @@ public static partial class BandcampParser
                     return new PriceInfo { Amount = a, Currency = GetString(offers, "priceCurrency") ?? "", OrMore = orMore };
                 }
             }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// レーベル名。JSON-LD の recordLabel (アーティストのページでレーベルから出ている作品) があればそれ、
+    /// 無ければページの持ち主 (publisher) がアーティスト (byArtist) と違えばそれ (レーベルのページの作品)。自主リリースは ""。
+    /// </summary>
+    private static string ParseLabel(IDocument doc)
+    {
+        foreach (var script in doc.QuerySelectorAll("script[type='application/ld+json']"))
+        {
+            using var ld = TryParseJson(script.TextContent);
+            if (ld is null)
+            {
+                continue;
+            }
+
+            if (FindRecordLabel(ld.RootElement) is { Length: > 0 } recordLabel)
+            {
+                return recordLabel;
+            }
+
+            var root = ld.RootElement;
+            var publisher = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("publisher", out var p) ? GetString(p, "name") : null;
+            var artist = root.ValueKind == JsonValueKind.Object && root.TryGetProperty("byArtist", out var a) ? GetString(a, "name") : null;
+            if (!string.IsNullOrWhiteSpace(publisher) && !string.Equals(publisher, artist, StringComparison.OrdinalIgnoreCase))
+            {
+                return publisher.Trim();
+            }
+        }
+
+        return "";
+    }
+
+    private static string? FindRecordLabel(JsonElement e)
+    {
+        switch (e.ValueKind)
+        {
+            case JsonValueKind.Object:
+                if (e.TryGetProperty("recordLabel", out var label) && GetString(label, "name") is { Length: > 0 } name)
+                {
+                    return name.Trim();
+                }
+
+                foreach (var p in e.EnumerateObject())
+                {
+                    if (FindRecordLabel(p.Value) is { } found)
+                    {
+                        return found;
+                    }
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in e.EnumerateArray())
+                {
+                    if (FindRecordLabel(item) is { } found)
+                    {
+                        return found;
+                    }
+                }
+
+                break;
         }
 
         return null;

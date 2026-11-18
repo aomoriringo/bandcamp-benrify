@@ -62,7 +62,7 @@ public sealed class BrowseItemViewModel : ObservableObject
                     Id = value.Id;
                 }
 
-                foreach (var p in new[] { nameof(SupText), nameof(SupSort), nameof(PriceText), nameof(PriceSort), nameof(ReleaseDate), nameof(ReleaseDateText), nameof(TrackCount), nameof(StateText), nameof(HasAudio) })
+                foreach (var p in new[] { nameof(Label), nameof(SupText), nameof(SupSort), nameof(PriceText), nameof(PriceSort), nameof(ReleaseDate), nameof(ReleaseDateText), nameof(TrackCount), nameof(StateText), nameof(HasAudio) })
                 {
                     OnPropertyChanged(p);
                 }
@@ -93,6 +93,9 @@ public sealed class BrowseItemViewModel : ObservableObject
             }
         }
     }
+
+    /// <summary>レーベル名 (作品ページ取得後に分かる。自主リリースは空)。</summary>
+    public string Label => Page?.Label ?? "";
 
     public string SupText => !IsRelease ? "" : Page?.Supporters.Display ?? "…";
 
@@ -308,7 +311,13 @@ public sealed class BrowseViewModel : ObservableObject
                 return s.Error is null ? "読み込み中…" : "エラー: " + s.Error;
             }
 
-            var parts = new List<string> { $"サポーター {p.Supporters.Display}" };
+            var parts = new List<string>();
+            if (p.Label is { Length: > 0 } label)
+            {
+                parts.Add($"レーベル: {label}");
+            }
+
+            parts.Add($"サポーター {p.Supporters.Display}");
             if (p.Price is { } price)
             {
                 parts.Add($"{(p.Type == ItemType.Album ? "アルバム" : "曲")} {price.Display}");

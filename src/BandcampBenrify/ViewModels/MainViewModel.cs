@@ -312,7 +312,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public string NowTitle => Current?.Title ?? "再生していません";
 
-    public string NowSubtitle => Current is null ? "" : $"{(IsPreview ? "試聴中 · " : "")}{Current.Artist} — {Current.Album}";
+    public string NowSubtitle => Current is null
+        ? ""
+        : $"{(IsPreview ? "試聴中 · " : "")}{Current.Artist} — {Current.Album}" + (Current.Details.Label is { Length: > 0 } label ? $"  [{label}]" : "");
 
     /// <summary>再生中の曲のサポーター数と値段。</summary>
     public string NowStats => Current is null
@@ -685,6 +687,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         if (ReferenceEquals(item, Current))
         {
             OnPropertyChanged(nameof(NowStats));
+            OnPropertyChanged(nameof(NowSubtitle));
         }
     }
 
@@ -812,7 +815,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 ReportJob($"曲の情報を取得中 {done}/{urls.Count} (残り約 {Format.Eta(eta)})", (double)done / urls.Count);
                 try
                 {
-                    await _client.GetTralbumAsync(url, RequestPriority.Background, ct: ct);
+                    // 古い版で保存したページ (レーベル不明) はキャッシュが新しくても取り直す。数えたサポーター数は引き継がれる
+                    var stale = _client.TryGetCachedTralbum(url) is { Label: null };
+                    await _client.GetTralbumAsync(url, RequestPriority.Background, forceRefresh: stale, ct: ct);
                 }
                 catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
                 {

@@ -11,7 +11,7 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
         nameof(TotalText), nameof(TotalSort), nameof(AlbumSupText), nameof(AlbumSupSort),
         nameof(TrackSupText), nameof(TrackSupSort), nameof(TrackPriceText), nameof(TrackPriceSort),
         nameof(AlbumPriceText), nameof(AlbumPriceSort), nameof(ReleaseDate), nameof(ReleaseDateText),
-        nameof(NeedsDetails), nameof(TotalIsPartial),
+        nameof(NeedsDetails), nameof(TotalIsPartial), nameof(Label),
     ];
 
     private bool _isPlaying;
@@ -35,6 +35,9 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
     public string Artist => Track.Artist;
 
     public string Album => string.IsNullOrEmpty(Track.AlbumTitle) ? "(シングル)" : Track.AlbumTitle;
+
+    /// <summary>レーベル名 (自主リリースは空、不明なら「…」)。</summary>
+    public string Label => _details.Label ?? "…";
 
     public string Duration => Format.Duration(Track.DurationSeconds);
 

@@ -246,6 +246,55 @@ public class DetailsTests
         Assert.Equal(expected, BandcampUrls.ParseFanUsername(input));
     }
 
+    private static string LabelHtml(object ld) => $"""
+        <html><head><script type="application/ld+json">{JsonSerializer.Serialize(ld)}</script>
+        <script data-tralbum="{Attr(new { item_type = "album", id = 1L, url = AlbumUrl, artist = "Joviale", current = new { title = "X" }, trackinfo = new object[] { new { id = 5L, title = "t", file = new Dictionary<string, string> { ["mp3-128"] = "https://x/?ts=1" } } } })}"></script></head></html>
+        """;
+
+    [Fact]
+    public void LabelFromRecordLabelOnArtistPage()
+    {
+        var html = LabelHtml(new Dictionary<string, object>
+        {
+            ["publisher"] = new { name = "Joviale" },
+            ["byArtist"] = new { name = "Joviale" },
+            ["albumRelease"] = new object[] { new { recordLabel = new { name = "Ghostly International" } }, new Dictionary<string, object>() },
+        });
+        var page = BandcampParser.ParseTralbum(html, AlbumUrl, Now);
+        Assert.Equal("Ghostly International", page.Label);
+        Assert.Equal("Ghostly International", page.Tracks[0].Label);
+    }
+
+    [Fact]
+    public void LabelFromPublisherOnLabelPage()
+    {
+        var html = LabelHtml(new Dictionary<string, object> { ["publisher"] = new { name = "Well Street Records" }, ["byArtist"] = new { name = "Yushh" } });
+        Assert.Equal("Well Street Records", BandcampParser.ParseTralbum(html, AlbumUrl, Now).Label);
+    }
+
+    [Fact]
+    public void SelfReleaseHasEmptyLabel()
+    {
+        var html = LabelHtml(new Dictionary<string, object> { ["publisher"] = new { name = "Joviale" }, ["byArtist"] = new { name = "Joviale" } });
+        Assert.Equal("", BandcampParser.ParseTralbum(html, AlbumUrl, Now).Label);
+    }
+
+    [Fact]
+    public void OldCachedAlbumWithoutLabelIsRefetched()
+    {
+        var album = BandcampParser.ParseTralbum(AlbumHtml(45), AlbumUrl, Now) with { Label = null };
+        var trackPage = BandcampParser.ParseTralbum(TrackHtml(2), SnowUrl, Now);
+        var queued = album.Tracks[0] with { Label = null };
+        var d = TrackDetailsResolver.Resolve(queued, url => url == AlbumUrl ? album : url == SnowUrl ? trackPage : null);
+
+        // 曲ページから分かればそれを使い、取り直しは不要
+        Assert.Equal(trackPage.Label, d.Label);
+
+        var noTrackLabel = TrackDetailsResolver.Resolve(queued, url => url == AlbumUrl ? album : url == SnowUrl ? trackPage with { Label = null } : null);
+        Assert.Null(noTrackLabel.Label);
+        Assert.Equal([AlbumUrl], noTrackLabel.MissingPages(queued));
+    }
+
     [Fact]
     public void FanPageWithoutDataThrows()
     {

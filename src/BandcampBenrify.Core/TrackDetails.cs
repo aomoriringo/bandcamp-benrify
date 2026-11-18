@@ -29,6 +29,12 @@ public sealed record TrackDetails
 
     public SupporterInfo? TrackSupporters => TrackPage?.Supporters;
 
+    /// <summary>キューに入れたときの曲データが持っていたレーベル (古いデータでは null)。</summary>
+    public string? TrackLabel { get; init; }
+
+    /// <summary>レーベル名 ("" は自主リリース、null は不明 = 古いキャッシュでページの取り直しが必要)。</summary>
+    public string? Label => AlbumPage?.Label ?? TrackPage?.Label ?? TrackLabel;
+
     public PriceInfo? AlbumPrice => AlbumPage?.Price;
 
     public PriceInfo? TrackPrice => TrackPage?.Price;
@@ -47,7 +53,10 @@ public sealed record TrackDetails
 
     public double TotalSortKey => HasAnyData ? Total + (TotalHasMore ? 0.5 : 0) : -1;
 
-    /// <summary>曲ページ / アルバムページのうち未取得の URL。</summary>
+    /// <summary>
+    /// 曲ページ / アルバムページのうち未取得の URL。
+    /// 取得済みでも古い版で保存したためレーベルが分からないページは、取り直し対象として含める。
+    /// </summary>
     public IEnumerable<string> MissingPages(TrackInfo track)
     {
         if (TrackPage is null)
@@ -58,6 +67,11 @@ public sealed record TrackDetails
         if (AlbumUrl is not null && AlbumPage is null)
         {
             yield return AlbumUrl;
+        }
+
+        if (Label is null && (AlbumUrl is not null ? AlbumPage : TrackPage) is { } labelPage)
+        {
+            yield return labelPage.Url;
         }
     }
 }
@@ -95,6 +109,7 @@ public static class TrackDetailsResolver
 
         return new TrackDetails
         {
+            TrackLabel = track.Label,
             AlbumUrl = albumUrl,
             AlbumPage = albumPage,
             TrackPage = trackPage,

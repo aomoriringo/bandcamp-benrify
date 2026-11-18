@@ -233,6 +233,7 @@
                                         <DataGridTextColumn Header="購入済み" Binding="{Binding PurchaseText}" Width="86" ElementStyle="{StaticResource PurchaseCell}" />
                                         <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="2*" MinWidth="120" ElementStyle="{StaticResource CellText}" />
                                         <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="*" MinWidth="80" ElementStyle="{StaticResource CellText}" />
+                                        <DataGridTextColumn Header="レーベル" Binding="{Binding Label}" Width="0.8*" MinWidth="70" ElementStyle="{StaticResource CellText}" />
                                         <DataGridTextColumn Header="サポーター" Binding="{Binding SupText}" SortMemberPath="SupSort" Width="80" ElementStyle="{StaticResource TotalCell}" />
                                         <DataGridTextColumn Header="値段" Binding="{Binding PriceText}" SortMemberPath="PriceSort" Width="70" ElementStyle="{StaticResource NumCell}" />
                                         <DataGridTextColumn Header="リリース日" Binding="{Binding ReleaseDateText}" SortMemberPath="ReleaseDate" Width="90" ElementStyle="{StaticResource CellText}" />
@@ -395,6 +396,7 @@
                     <DataGridTextColumn Header="タイトル" Binding="{Binding Title}" Width="2*" MinWidth="160" ElementStyle="{StaticResource CellText}" />
                     <DataGridTextColumn Header="アーティスト" Binding="{Binding Artist}" Width="1.2*" MinWidth="100" ElementStyle="{StaticResource CellText}" />
                     <DataGridTextColumn Header="アルバム" Binding="{Binding Album}" Width="1.5*" MinWidth="100" ElementStyle="{StaticResource CellText}" />
+                    <DataGridTextColumn Header="レーベル" Binding="{Binding Label}" Width="1*" MinWidth="80" ElementStyle="{StaticResource CellText}" />
                     <DataGridTextColumn Binding="{Binding TotalText}" SortMemberPath="TotalSort" Width="92" ElementStyle="{StaticResource TotalCell}">
                         <DataGridTextColumn.Header>
                             <TextBlock Text="サポーター計" ToolTip="アルバムのサポーター + 曲単体のサポーター。&#10;「+」: ページに載りきらないほど多い / 「?」: 曲単体が未取得" />
