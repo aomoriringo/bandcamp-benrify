@@ -45,7 +45,7 @@ public sealed class ThrottledHttpClient : IDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"BandcampBenrify/{typeof(ThrottledHttpClient).Assembly.GetName().Version?.ToString(3) ?? "0"} (+https://github.com/aomoriringo/bandcamp-benrify)");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"BandcampBenrify/{typeof(ThrottledHttpClient).Assembly.GetName().Version?.ToString(3) ?? "0"}");
         _http.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/json;q=0.9,*/*;q=0.8");
         _worker = Task.Run(WorkerLoopAsync);
     }

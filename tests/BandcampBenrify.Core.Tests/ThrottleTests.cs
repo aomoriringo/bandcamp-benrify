@@ -49,6 +49,23 @@ public class ThrottleTests
     }
 
     [Fact]
+    public async Task UserAgentIsAppNameAndVersionOnly()
+    {
+        string? userAgent = null;
+        var handler = new FakeHandler(req =>
+        {
+            userAgent = req.Headers.UserAgent.ToString();
+            return Ok();
+        });
+        using var client = new ThrottledHttpClient(TimeSpan.FromSeconds(1), handler);
+
+        await client.GetAsync("https://x.test/", RequestPriority.Interactive);
+
+        var version = typeof(ThrottledHttpClient).Assembly.GetName().Version!.ToString(3);
+        Assert.Equal($"BandcampBenrify/{version}", userAgent);
+    }
+
+    [Fact]
     public void IntervalCannotGoBelowOneSecond()
     {
         using var client = new ThrottledHttpClient(TimeSpan.FromMilliseconds(10), new FakeHandler(_ => Ok()));
