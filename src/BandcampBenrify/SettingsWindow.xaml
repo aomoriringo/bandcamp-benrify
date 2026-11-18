@@ -53,12 +53,11 @@
 
     <StackPanel Margin="24,8,24,20">
         <TextBlock Text="テーマカラー" Style="{StaticResource Heading}" />
-        <TextBlock Text="ボタン・タブ・再生中の曲などに使う色です。選ぶとすぐ画面に反映されます (キャンセルで元に戻ります)。" Style="{StaticResource Note}" />
-        <StackPanel x:Name="SwatchPanel" Orientation="Horizontal" />
+        <StackPanel x:Name="SwatchPanel" Orientation="Horizontal" Margin="0,8,0,0" />
         <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
             <TextBlock Text="色コード" VerticalAlignment="Center" Foreground="{StaticResource SubTextBrush}" />
             <TextBox x:Name="ColorBox" Width="110" Padding="8,4" Margin="10,0,0,0" AutomationProperties.Name="テーマカラーの色コード" TextChanged="ColorBox_TextChanged" />
-            <TextBlock x:Name="ColorHint" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="12" Foreground="{StaticResource MutedText}" Text="#RRGGBB の形で好きな色も使えます" />
+            <TextBlock x:Name="ColorHint" VerticalAlignment="Center" Margin="10,0,0,0" FontSize="12" Foreground="{StaticResource MutedText}" />
         </StackPanel>
         <CheckBox x:Name="PlayerArtColorCheck" Content="再生バーの色を、再生中の曲のジャケットに合わせる" Margin="0,12,0,0"
                   Checked="PlayerArtColor_Changed" Unchecked="PlayerArtColor_Changed"
@@ -78,7 +77,8 @@
         </StackPanel>
 
         <TextBlock Text="キャッシュ" Style="{StaticResource Heading}" />
-        <DockPanel Margin="0,6,0,0">
+        <TextBlock Text="取得済みのページを保存し、同じページへの重複したリクエストを防ぎます。" Style="{StaticResource Note}" />
+        <DockPanel>
             <Button x:Name="ClearCacheButton" DockPanel.Dock="Right" Content="キャッシュを削除" Click="ClearCache_Click" Style="{StaticResource PillButton}" />
             <TextBlock x:Name="CacheText" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" TextWrapping="Wrap" />
         </DockPanel>

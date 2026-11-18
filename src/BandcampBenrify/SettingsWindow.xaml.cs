@@ -72,7 +72,7 @@ public partial class SettingsWindow : Window
     private void ColorBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         var color = SelectedColor;
-        ColorHint.Text = color is null ? "#RRGGBB の形で入力してください (例: #3CC8E8)" : "#RRGGBB の形で好きな色も使えます";
+        ColorHint.Text = color is null ? "#RRGGBB の形で入力してください (例: #3CC8E8)" : "";
         OkButton.IsEnabled = color is not null && IsProfileValid;
         if (color is not { } c)
         {
@@ -128,7 +128,7 @@ public partial class SettingsWindow : Window
 
     private void UpdateCacheText()
     {
-        CacheText.Text = $"{_vm.CacheSizeBytes / 1024.0 / 1024.0:0.0} MB。取得したページを保存して、同じページを取りに行かないようにしています。";
+        CacheText.Text = $"使用量: {_vm.CacheSizeBytes / 1024.0 / 1024.0:0.0} MB";
     }
 
     private void ClearCache_Click(object sender, RoutedEventArgs e)
