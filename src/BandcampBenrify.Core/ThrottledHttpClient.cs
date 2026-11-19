@@ -34,6 +34,9 @@ public sealed class ThrottledHttpClient : IDisposable
     private DateTimeOffset _lastRequestAt = DateTimeOffset.MinValue;
     private long _totalRequests;
 
+    /// <summary>名乗る User-Agent (アプリ名とバージョンだけ)。</summary>
+    public static string UserAgent { get; } = $"BandcampBenrify/{typeof(ThrottledHttpClient).Assembly.GetName().Version?.ToString(3) ?? "0"}";
+
     public ThrottledHttpClient(TimeSpan minInterval, HttpMessageHandler? handler = null, Func<TimeSpan, CancellationToken, Task>? delay = null)
     {
         MinInterval = minInterval;
@@ -45,7 +48,7 @@ public sealed class ThrottledHttpClient : IDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         };
         _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        _http.DefaultRequestHeaders.UserAgent.ParseAdd($"BandcampBenrify/{typeof(ThrottledHttpClient).Assembly.GetName().Version?.ToString(3) ?? "0"}");
+        _http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
         _http.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/json;q=0.9,*/*;q=0.8");
         _worker = Task.Run(WorkerLoopAsync);
     }

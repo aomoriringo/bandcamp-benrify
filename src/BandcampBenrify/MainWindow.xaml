@@ -249,15 +249,32 @@
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="40" TextAlignment="Right" />
-                        <Slider x:Name="SeekBar" AutomationProperties.Name="再生位置" Grid.Column="1" Margin="10,0" VerticalAlignment="Center" Style="{StaticResource PlayerSlider}"
+                        <!-- 波形 (再生した曲を解析して描く。解析前は普通のシークバーの見た目) と、その上に重ねた透明なシークバー -->
+                        <infra:WaveformView x:Name="Waveform" Grid.Column="1" Margin="10,0" Height="36"
+                                            Peaks="{Binding NowPeaks}" Duration="{Binding Duration}" Position="{Binding Value, ElementName=SeekBar}"
+                                            PlayedBrush="{DynamicResource AccentBrush}" RestBrush="#4DFFFFFF">
+                            <infra:WaveformView.Style>
+                                <Style TargetType="infra:WaveformView">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding HasCurrent}" Value="False">
+                                            <Setter Property="Opacity" Value="0.4" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </infra:WaveformView.Style>
+                        </infra:WaveformView>
+                        <Slider x:Name="SeekBar" AutomationProperties.Name="再生位置" Grid.Column="1" Margin="5,0" Height="36" Style="{StaticResource WaveSlider}"
                                 IsEnabled="{Binding HasCurrent}"
                                 Minimum="0" Maximum="{Binding SeekMaximum}" Value="{Binding Position, Mode=OneWay}"
                                 IsMoveToPointEnabled="True"
                                 Thumb.DragStarted="SeekBar_DragStarted" Thumb.DragCompleted="SeekBar_DragCompleted"
                                 PreviewMouseLeftButtonUp="SeekBar_MouseUp" />
                         <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="40" />
+                        <TextBlock Grid.Column="3" Text="{Binding NowBpmText}" ToolTip="{Binding NowBpmToolTip}" VerticalAlignment="Center"
+                                   Foreground="{StaticResource DimTextBrush}" FontSize="12" Margin="4,0,0,0" MinWidth="56" />
                     </Grid>
                 </StackPanel>
 
@@ -469,6 +486,11 @@
                                     <DataGridTextColumn Header="うち曲単体" Binding="{Binding TrackSupText}" SortMemberPath="TrackSupSort" Width="72" ElementStyle="{StaticResource SubNumCell}" />
                                     <DataGridTextColumn Header="曲の値段" Binding="{Binding TrackPriceText}" SortMemberPath="TrackPriceSort" Width="72" ElementStyle="{StaticResource NumCell}" />
                                     <DataGridTextColumn Header="長さ" Binding="{Binding Duration}" SortMemberPath="DurationSeconds" Width="52" ElementStyle="{StaticResource SubNumCell}" />
+                                    <DataGridTextColumn Binding="{Binding BpmText}" SortMemberPath="BpmSort" Width="52" ElementStyle="{StaticResource SubNumCell}">
+                                        <DataGridTextColumn.Header>
+                                            <TextBlock Text="BPM" ToolTip="再生したときに曲から推定した BPM (目安。倍や半分になっていることがあります)&#10;空欄: まだ再生していない曲 / 「—」: テンポがはっきりせず推定できなかった曲" />
+                                        </DataGridTextColumn.Header>
+                                    </DataGridTextColumn>
                                 </DataGrid.Columns>
                             </DataGrid>
                         </DockPanel>
@@ -574,6 +596,11 @@
                     <DataGridTextColumn Header="アルバムの値段" Binding="{Binding AlbumPriceText}" SortMemberPath="AlbumPriceSort" Width="96" ElementStyle="{StaticResource NumCell}" />
                     <DataGridTextColumn Header="リリース日" Binding="{Binding ReleaseDateText}" SortMemberPath="ReleaseDate" Width="90" ElementStyle="{StaticResource SubCell}" />
                     <DataGridTextColumn Header="長さ" Binding="{Binding Duration}" SortMemberPath="DurationSeconds" Width="56" ElementStyle="{StaticResource SubNumCell}" />
+                    <DataGridTextColumn Binding="{Binding BpmText}" SortMemberPath="BpmSort" Width="52" ElementStyle="{StaticResource SubNumCell}">
+                        <DataGridTextColumn.Header>
+                            <TextBlock Text="BPM" ToolTip="再生したときに曲から推定した BPM (目安。倍や半分になっていることがあります)&#10;空欄: まだ再生していない曲 / 「—」: テンポがはっきりせず推定できなかった曲" />
+                        </DataGridTextColumn.Header>
+                    </DataGridTextColumn>
                 </DataGrid.Columns>
             </DataGrid>
 

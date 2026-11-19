@@ -44,6 +44,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private HashSet<long> _ownedTracks = [];
     private readonly CheckedTrackStore _checked;
 
+    /// <summary>曲の音声のダウンロード用 (Bandcamp の配信サーバー。再生 1 回につき 1 リクエスト)。</summary>
+    private static readonly HttpClient AudioHttp = CreateAudioHttp();
+    private readonly Dispatcher _ui = Dispatcher.CurrentDispatcher;
+    private readonly TrackAnalysisStore _analysis;
+    private ProgressiveDownload? _download;
+    private CancellationTokenSource? _analysisCts;
+    private byte[]? _nowPeaks;
+    private string _nowBpmText = "";
+    private string? _nowBpmToolTip;
+
     /// <summary>
     /// 再生中の曲が表示から外れた (チェックして隠した) ときに、次の曲を決めるための「さっきまでの位置」。
     /// </summary>
@@ -79,6 +89,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             TralbumTtl = TimeSpan.FromHours(settings.PageCacheHours),
             DiscographyTtl = TimeSpan.FromHours(settings.DiscographyCacheHours),
         };
+        _analysis = new TrackAnalysisStore(_cache);
 
         var view = (ListCollectionView)CollectionViewSource.GetDefaultView(Queue);
         view.IsLiveSorting = true;
@@ -86,7 +97,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                  {
                      nameof(QueueItemViewModel.TotalSort), nameof(QueueItemViewModel.AlbumSupSort), nameof(QueueItemViewModel.TrackSupSort),
                      nameof(QueueItemViewModel.TrackPriceSort), nameof(QueueItemViewModel.AlbumPriceSort), nameof(QueueItemViewModel.ReleaseDate),
-                     nameof(QueueItemViewModel.PurchaseText), nameof(QueueItemViewModel.CheckedSort),
+                     nameof(QueueItemViewModel.PurchaseText), nameof(QueueItemViewModel.CheckedSort), nameof(QueueItemViewModel.BpmSort),
                  })
         {
             view.LiveSortingProperties.Add(p);
@@ -529,6 +540,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 LoadCachedCollection();
                 StatusText = "コレクションのキャッシュを削除しました (購入済みマークは「コレクション更新」で戻せます)";
                 break;
+            case CacheKind.Analysis:
+                _analysis.Clear();
+                foreach (var row in Queue.Concat(Browse.Tracks))
+                {
+                    row.SetBpm(false, null);
+                }
+
+                StatusText = "曲の解析結果のキャッシュを削除しました (次に再生したときに解析し直します)";
+                break;
         }
     }
 
@@ -609,6 +629,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string PositionText => Format.Duration(Position) is { Length: > 0 } s ? s : "0:00";
 
     public string DurationText => Format.Duration(Duration) is { Length: > 0 } s ? s : "0:00";
+
+    /// <summary>再生中の曲の波形 (0.1 秒ごとの音量)。解析中は届いた分だけ、未解析なら null。</summary>
+    public byte[]? NowPeaks
+    {
+        get => _nowPeaks;
+        private set => Set(ref _nowPeaks, value);
+    }
+
+    public string NowBpmText
+    {
+        get => _nowBpmText;
+        private set => Set(ref _nowBpmText, value);
+    }
+
+    public string? NowBpmToolTip
+    {
+        get => _nowBpmToolTip;
+        private set => Set(ref _nowBpmToolTip, value);
+    }
 
     public int ActiveJobs
     {
@@ -860,6 +899,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         item.IsQueued = _queuedTrackIds.Contains(item.Track.TrackId);
         item.CheckRequested ??= (row, value) => SetChecked([row], value);
         item.SetCheckedState(_checked.Contains(item.Track.TrackId));
+        item.SetBpm(_analysis.TryGetBpm(item.Track.TrackId, out var bpm), bpm);
         if (Queue.Contains(item))
         {
             UpdateQueueMaxSupporters();
@@ -1247,6 +1287,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _playCts?.Cancel();
         var cts = _playCts = new CancellationTokenSource();
         _player.Stop();
+        ReleaseDownload();
         Current = item;
         RememberCurrentIndex();
         IsPlaying = false;
@@ -1283,14 +1324,159 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        OpenAndPlay(item, url);
+        await OpenAndPlayAsync(item, url, cts.Token);
     }
 
-    private void OpenAndPlay(QueueItemViewModel item, string url)
+    /// <summary>
+    /// 音声を 1 回だけダウンロードし、届いた分から再生と解析 (波形・BPM) の両方に回す。
+    /// 再生はダウンロードの完了を待たずに始まる。
+    /// </summary>
+    private async Task OpenAndPlayAsync(QueueItemViewModel item, string url, CancellationToken ct)
     {
-        _player.Open(url, new NowPlayingInfo(item.Title, item.Artist, item.Album, NowArtUrl));
+        _player.Stop();
+        ReleaseDownload();
+        ProgressiveDownload? download;
+        try
+        {
+            download = await ProgressiveDownload.StartAsync(AudioHttp, url, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+        {
+            if (ReferenceEquals(item, Current))
+            {
+                await OnPlaybackFailedAsync(ex is OperationCanceledException ? "タイムアウト" : ex.Message);
+            }
+
+            return;
+        }
+
+        if (ct.IsCancellationRequested || !ReferenceEquals(item, Current))
+        {
+            download?.Dispose();
+            return;
+        }
+
+        var info = new NowPlayingInfo(item.Title, item.Artist, item.Album, NowArtUrl);
+        if (download is null)
+        {
+            // 長さが分からない応答 (通常は無い): 解析はせず、これまでどおり URL から再生する
+            _player.Open(url, info);
+        }
+        else
+        {
+            _download = download;
+            _player.Open(download.OpenReader(), info);
+            StartAnalysis(item, download);
+        }
+
         _player.Play();
         IsPlaying = true;
+    }
+
+    /// <summary>解析済みならそれを出し、まだなら同じダウンロードを読みながら裏で解析する。</summary>
+    private void StartAnalysis(QueueItemViewModel item, ProgressiveDownload download)
+    {
+        _analysisCts?.Cancel();
+        var cts = _analysisCts = new CancellationTokenSource();
+        var trackId = item.Track.TrackId;
+        if (_analysis.TryGet(trackId) is { } cached)
+        {
+            ShowAnalysis(cached);
+            return;
+        }
+
+        NowPeaks = null;
+        NowBpmText = "BPM 解析中…";
+        NowBpmToolTip = null;
+        var reader = download.OpenReader();
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                var result = AudioAnalyzer.AnalyzeMp3(
+                    reader,
+                    peaks => _ui.BeginInvoke(() =>
+                    {
+                        if (!cts.IsCancellationRequested)
+                        {
+                            NowPeaks = peaks;
+                        }
+                    }),
+                    cts.Token);
+                _ui.BeginInvoke(() =>
+                {
+                    _analysis.Save(trackId, result);
+                    foreach (var row in Queue.Concat(Browse.Tracks).Where(r => r.Track.TrackId == trackId))
+                    {
+                        row.SetBpm(true, result.Bpm);
+                    }
+
+                    if (!cts.IsCancellationRequested)
+                    {
+                        ShowAnalysis(result);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                // 曲を変えた (ダウンロードを捨てた) / 読めない mp3 など。再生には影響させない
+                _ui.BeginInvoke(() =>
+                {
+                    if (!cts.IsCancellationRequested)
+                    {
+                        NowBpmText = "";
+                        NowBpmToolTip = null;
+                        Debug.WriteLine($"解析できませんでした: {ex.Message}");
+                    }
+                });
+            }
+            finally
+            {
+                reader.Dispose();
+            }
+        });
+    }
+
+    private void ShowAnalysis(TrackAnalysis analysis)
+    {
+        NowPeaks = analysis.Peaks;
+        if (analysis.Bpm is { } bpm)
+        {
+            NowBpmText = $"{Math.Round(bpm):0} BPM";
+            NowBpmToolTip = $"推定 BPM: {bpm:0.0} (確からしさ {analysis.BpmConfidence:0.00})\n曲から自動で推定した目安です。倍や半分になっていることがあります";
+        }
+        else
+        {
+            NowBpmText = "BPM —";
+            NowBpmToolTip = "テンポがはっきりしないため、BPM を推定できませんでした";
+        }
+    }
+
+    /// <summary>再生中の曲のダウンロードと解析をやめる (再生を止めてから呼ぶ)。</summary>
+    private void ReleaseDownload()
+    {
+        _analysisCts?.Cancel();
+        _analysisCts = null;
+        _download?.Dispose();
+        _download = null;
+        NowPeaks = null;
+        NowBpmText = "";
+        NowBpmToolTip = null;
+    }
+
+    private static HttpClient CreateAudioHttp()
+    {
+        var http = new HttpClient(new SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+        {
+            // 応答ヘッダーが届くまでの時間 (本体は再生しながら読む)
+            Timeout = TimeSpan.FromSeconds(30),
+        };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd(ThrottledHttpClient.UserAgent);
+        return http;
     }
 
     private async Task OnPlaybackFailedAsync(string message)
@@ -1313,7 +1499,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             var url = await _client.GetStreamUrlAsync(item.Track, forceRefresh: true, ct);
             if (url is not null && !ct.IsCancellationRequested && ReferenceEquals(item, Current))
             {
-                OpenAndPlay(item, url);
+                await OpenAndPlayAsync(item, url, ct);
                 return;
             }
         }
@@ -1344,6 +1530,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         _playCts?.Cancel();
         _player.Stop();
+        ReleaseDownload();
         Current = null;
         IsPlaying = false;
         Position = 0;
@@ -1494,6 +1681,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _settings.Save();
         _jobsCts.Cancel();
         _player.Stop();
+        ReleaseDownload();
         _player.Dispose();
         _http.Dispose();
     }

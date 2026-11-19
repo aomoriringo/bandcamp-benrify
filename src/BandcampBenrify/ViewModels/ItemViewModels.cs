@@ -64,6 +64,28 @@ public sealed class QueueItemViewModel(TrackInfo track, int seq) : ObservableObj
 
     public string QueuedText => IsQueued ? "✓" : "";
 
+    private bool _analyzed;
+    private double? _bpm;
+
+    /// <summary>再生したときに解析した BPM。解析済みでテンポが分からなかった曲は analyzed: true / bpm: null。</summary>
+    public void SetBpm(bool analyzed, double? bpm)
+    {
+        if (_analyzed == analyzed && _bpm == bpm)
+        {
+            return;
+        }
+
+        _analyzed = analyzed;
+        _bpm = bpm;
+        OnPropertyChanged(nameof(BpmText));
+        OnPropertyChanged(nameof(BpmSort));
+    }
+
+    /// <summary>未解析 (まだ再生していない) は空、テンポが分からなかった曲は「—」。</summary>
+    public string BpmText => !_analyzed ? "" : _bpm is { } b ? Math.Round(b).ToString("0") : "—";
+
+    public double BpmSort => _bpm ?? (_analyzed ? 0 : -1);
+
     /// <summary>試聴できる曲か (「探す」の曲目用。ページから読んだ直後の TrackInfo にだけストリーム URL が入っている)。</summary>
     public bool IsStreamable => Track.StreamUrl is not null;
 

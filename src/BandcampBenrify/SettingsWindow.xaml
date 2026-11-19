@@ -88,6 +88,7 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
             <Grid.Resources>
                 <Style x:Key="CacheName" TargetType="TextBlock">
@@ -121,6 +122,11 @@
             <TextBlock x:Name="CollectionCacheText" Grid.Row="2" Grid.Column="1" Style="{StaticResource CacheSize}" />
             <Button x:Name="ClearCollectionCacheButton" Grid.Row="2" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Collection"
                     AutomationProperties.Name="コレクションのキャッシュを削除" />
+
+            <TextBlock Grid.Row="3" Text="曲の解析 (波形・BPM)" Style="{StaticResource CacheName}" />
+            <TextBlock x:Name="AnalysisCacheText" Grid.Row="3" Grid.Column="1" Style="{StaticResource CacheSize}" />
+            <Button x:Name="ClearAnalysisCacheButton" Grid.Row="3" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Analysis"
+                    AutomationProperties.Name="曲の解析結果のキャッシュを削除" />
         </Grid>
 
         <DockPanel Margin="0,28,0,0">

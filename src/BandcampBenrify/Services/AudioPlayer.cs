@@ -1,3 +1,4 @@
+using System.IO;
 using System.Windows.Threading;
 using Windows.Media;
 using Windows.Media.Core;
@@ -93,9 +94,15 @@ public sealed class AudioPlayer : IDisposable
 
     public TimeSpan? Duration => _player.PlaybackSession.NaturalDuration is { Ticks: > 0 } d ? d : null;
 
-    public void Open(string url, NowPlayingInfo info)
+    public void Open(string url, NowPlayingInfo info) => Open(MediaSource.CreateFromUri(new Uri(url)), info);
+
+    /// <summary>ダウンロード中のデータを読むストリームから再生する (まだ届いていない位置は届くまで待つ)。</summary>
+    public void Open(Stream mp3, NowPlayingInfo info) =>
+        Open(MediaSource.CreateFromStream(mp3.AsRandomAccessStream(), "audio/mpeg"), info);
+
+    private void Open(MediaSource source, NowPlayingInfo info)
     {
-        var item = new MediaPlaybackItem(MediaSource.CreateFromUri(new Uri(url)));
+        var item = new MediaPlaybackItem(source);
         var props = item.GetDisplayProperties();
         props.Type = MediaPlaybackType.Music;
         props.MusicProperties.Title = info.Title;

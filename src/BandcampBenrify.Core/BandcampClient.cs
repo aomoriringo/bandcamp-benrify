@@ -17,6 +17,9 @@ public enum CacheKind
 
     /// <summary>自分のコレクション (購入済みマーク)。</summary>
     Collection,
+
+    /// <summary>再生した曲の解析結果 (波形・BPM)。消してもリクエストは増えない (次に再生したときに解析し直す)。</summary>
+    Analysis,
 }
 
 /// <summary>
@@ -69,6 +72,7 @@ public sealed class BandcampClient
     {
         CacheKind.Pages => [TralbumNs, LegacyTralbumNs],
         CacheKind.Discographies => [DiscographyNs, FanListNs],
+        CacheKind.Analysis => [TrackAnalysisStore.Namespace],
         _ => [CollectionNs],
     };
 
