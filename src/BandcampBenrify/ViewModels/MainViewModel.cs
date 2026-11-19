@@ -173,7 +173,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }, () => Queue.Count > 0);
         FetchDetailsCommand = new AsyncCommand(
             p => FetchDetailsAsync(Selected(p) is { Count: > 0 } sel ? sel : QueueView.Cast<QueueItemViewModel>().ToList()),
-            _ => (PendingPageCount > 0 || PendingPlusCount > 0) && !_fetchingDetails);
+            _ => (PendingPageCount > 0 || PendingPlusCount > 0) && !_fetchingDetails && !Browse.IsFetchingReleases);
         RefreshCollectionCommand = new AsyncCommand(RefreshCollectionAsync, () => HasProfile && !_loadingCollection);
         CancelJobsCommand = new RelayCommand(CancelJobs, () => ActiveJobs > 0);
         OpenInBrowserCommand = new RelayCommand(p => OpenUrl((p as QueueItemViewModel ?? Current)?.Track.TrackUrl));
@@ -938,17 +938,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // 量が多いときは確認する (人数を数える分は 1 作品 1 回以上なので最低限の見積もり)
-        var estimate = urls.Count + plusCount;
-        if (estimate > ConfirmRequestThreshold)
+        if (!ConfirmManyRequests(urls.Count, plusCount))
         {
-            var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * estimate);
-            if (MessageBox.Show(
-                    $"{urls.Count} ページの取得と {plusCount} 作品のサポーター集計で、少なくとも {estimate} 回 Bandcamp にアクセスします (約 {Format.Eta(eta)} 以上)。\n途中で中止でき、取得した分は保存されます。続けますか？",
-                    "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) != MessageBoxResult.OK)
-            {
-                return;
-            }
+            return;
         }
 
         var seen = new HashSet<string>(urls);
@@ -994,39 +986,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             }
 
             // 「N+」の作品の正確なサポーター数を数える
-            var plusPages = PagesWithMoreSupporters(targets);
-            var counted = 0;
-            var capped = 0;
-            foreach (var page in plusPages)
-            {
-                ct.ThrowIfCancellationRequested();
-                var label = $"正確なサポーター数を集計中 {counted}/{plusPages.Count} 作品: {page.Title}";
-                ReportJob(label, (double)counted / plusPages.Count);
-                var progress = new Progress<int>(n => ReportJob($"{label} ({n} 人まで数えました)", (double)counted / plusPages.Count));
-                try
-                {
-                    var result = await _client.CountSupportersAsync(page, _settings.SupportersMaxRequestsPerItem, progress, ct);
-                    if (result.Supporters.HasMore)
-                    {
-                        capped++;
-                    }
-                }
-                catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
-                {
-                    errors++;
-                    Debug.WriteLine($"{page.Url}: {ex.Message}");
-                }
-
-                counted++;
-                OnPageFetched(page.Url);
-            }
-
-            StatusText = (done > 0 ? $"{done} ページを取得" : "")
-                         + (done > 0 && counted > 0 ? "、" : "")
-                         + (counted > 0 ? $"{counted} 作品のサポーター数を集計" : "")
-                         + "しました"
-                         + (capped > 0 ? $" (サポーターが特に多い {capped} 作品は上限まで数えたので「+」のまま。もう一度押すと続きから数えます)" : "")
-                         + (errors > 0 ? $" (失敗 {errors})" : "");
+            var count = await CountExactSupportersAsync(PagesWithMoreSupporters(targets), ct);
+            StatusText = FetchResultText(done, count.Counted, count.Capped, errors + count.Errors);
         }
         catch (OperationCanceledException)
         {
@@ -1039,6 +1000,69 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             UpdatePendingCount();
         }
     }
+
+    /// <summary>
+    /// 量が多いときに確認する (人数を数える分は 1 作品 1 回以上なので最低限の見積もり)。続けてよければ true。
+    /// キューと「探す」で共通。
+    /// </summary>
+    public bool ConfirmManyRequests(int pages, int plusCount)
+    {
+        var estimate = pages + plusCount;
+        if (estimate <= ConfirmRequestThreshold)
+        {
+            return true;
+        }
+
+        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * estimate);
+        return MessageBox.Show(
+                   $"{pages} ページの取得と {plusCount} 作品のサポーター集計で、少なくとも {estimate} 回 Bandcamp にアクセスします (約 {Format.Eta(eta)} 以上)。\n途中で中止でき、取得した分は保存されます。続けますか？",
+                   "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK;
+    }
+
+    /// <summary>
+    /// 「N+」の作品のサポーターを「もっと見る」と同じ方法で数える (100 人 1 リクエスト、1 作品あたり上限あり)。
+    /// 進み具合はジョブ欄に出す。キューと「探す」で共通。
+    /// </summary>
+    public async Task<(int Counted, int Capped, int Errors)> CountExactSupportersAsync(IReadOnlyList<TralbumPage> pages, CancellationToken ct)
+    {
+        var counted = 0;
+        var capped = 0;
+        var errors = 0;
+        foreach (var page in pages)
+        {
+            ct.ThrowIfCancellationRequested();
+            var label = $"正確なサポーター数を集計中 {counted}/{pages.Count} 作品: {page.Title}";
+            ReportJob(label, (double)counted / pages.Count);
+            var progress = new Progress<int>(n => ReportJob($"{label} ({n} 人まで数えました)", (double)counted / pages.Count));
+            try
+            {
+                var result = await _client.CountSupportersAsync(page, _settings.SupportersMaxRequestsPerItem, progress, ct);
+                if (result.Supporters.HasMore)
+                {
+                    capped++;
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
+            {
+                errors++;
+                Debug.WriteLine($"{page.Url}: {ex.Message}");
+            }
+
+            counted++;
+            OnPageFetched(page.Url);
+        }
+
+        return (counted, capped, errors);
+    }
+
+    /// <summary>取得・集計が終わったときのステータス表示。</summary>
+    public static string FetchResultText(int pages, int counted, int capped, int errors) =>
+        (pages > 0 ? $"{pages} ページを取得" : "")
+        + (pages > 0 && counted > 0 ? "、" : "")
+        + (counted > 0 ? $"{counted} 作品のサポーター数を集計" : "")
+        + (pages > 0 || counted > 0 ? "しました" : "取得するものはありませんでした")
+        + (capped > 0 ? $" (サポーターが特に多い {capped} 作品は上限まで数えたので「+」のまま。もう一度押すと続きから数えます)" : "")
+        + (errors > 0 ? $" (失敗 {errors})" : "");
 
     // ---- コレクション (購入済み) ----
 

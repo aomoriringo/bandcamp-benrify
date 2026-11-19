@@ -302,7 +302,7 @@
                         <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                             <Button x:Name="FetchReleaseInfoButton" Content="{Binding ReleaseInfoButtonText}" Command="{Binding FetchReleaseInfoCommand}" Style="{StaticResource PillButton}"
-                                    ToolTip="一覧の作品ページを取得して、サポーター数・値段・リリース日を表示します (1 作品 1 リクエスト)。取得済みの作品はすぐ表示されます。" />
+                                    ToolTip="一覧 (絞り込み後) の作品ページを取得して、サポーター数・値段・リリース日を表示します (1 作品 1 リクエスト)。サポーターが「N+」の作品は、続けて正確な人数を数えます (100 人ごとに 1 リクエスト)。" />
                             <TextBlock Text="絞り込み" VerticalAlignment="Center" Margin="16,0,8,0" Foreground="{StaticResource MutedText}" />
                             <TextBox x:Name="BrowseFilterBox" Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}" Width="180" Padding="8,4" VerticalContentAlignment="Center"
                                      ToolTip="タイトル・アーティストで一覧を絞り込みます (Bandcamp には問い合わせません)" />

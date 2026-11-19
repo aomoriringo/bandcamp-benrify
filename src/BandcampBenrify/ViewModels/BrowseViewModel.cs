@@ -201,7 +201,7 @@ public sealed class BrowseViewModel : ObservableObject
         ItemsView = view;
 
         BackCommand = new AsyncCommand(BackAsync, () => _history.Count > 0);
-        FetchReleaseInfoCommand = new AsyncCommand(FetchReleaseInfoAsync, () => PendingReleaseCount > 0 && !_fetchingReleases);
+        FetchReleaseInfoCommand = new AsyncCommand(FetchReleaseInfoAsync, () => (PendingReleaseCount > 0 || PendingPlusCount > 0) && !_fetchingReleases && !_host.IsFetchingDetails);
         OpenItemCommand = new AsyncCommand(p => p is BrowseItemViewModel { Kind: SearchKind.Band } b ? OpenAsync(b.Url) : Task.CompletedTask);
         AddReleasesCommand = new AsyncCommand(p => AddReleasesAsync(SelectedReleases(p)), p => SelectedReleases(p).Count > 0);
         AddCurrentReleaseCommand = new AsyncCommand(() => AddReleasesAsync(SelectedItem is { IsRelease: true } s ? [s] : []), () => SelectedItem is { IsRelease: true, Page: not null });
@@ -209,7 +209,7 @@ public sealed class BrowseViewModel : ObservableObject
         PreviewCommand = new AsyncCommand(p => p is QueueItemViewModel { IsStreamable: true } t ? _host.PreviewAsync(t) : Task.CompletedTask);
         FetchTrackInfoCommand = new AsyncCommand(
             p => _host.FetchDetailsAsync(SelectedTracks(p) is { Count: > 0 } sel ? sel : Tracks.ToList()),
-            _ => Tracks.Any(t => t.NeedsDetails) && !_host.IsFetchingDetails);
+            _ => Tracks.Any(t => t.NeedsDetails) && !_host.IsFetchingDetails && !_fetchingReleases);
         OpenInBrowserCommand = new RelayCommand(p =>
         {
             var url = p switch
@@ -315,6 +315,12 @@ public sealed class BrowseViewModel : ObservableObject
     }
 
     public int PendingReleaseCount { get; private set; }
+
+    /// <summary>サポーターがページに載りきらず「N+」になっている作品の数 (正確な人数を数える対象)。</summary>
+    public int PendingPlusCount { get; private set; }
+
+    /// <summary>「作品の情報を取得」の実行中 (キューの「曲の情報を取得」と同時には動かさない)。</summary>
+    public bool IsFetchingReleases => _fetchingReleases;
 
     public string ReleaseInfoButtonText
     {
@@ -541,19 +547,44 @@ public sealed class BrowseViewModel : ObservableObject
     private void UpdatePendingCount()
     {
         PendingReleaseCount = Items.Count(i => i.IsRelease && i.Page is null);
-        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * PendingReleaseCount);
-        ReleaseInfoButtonText = PendingReleaseCount == 0
+        PendingPlusCount = PlusPages(Items).Count;
+        var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (PendingReleaseCount + PendingPlusCount));
+        var parts = new List<string>();
+        if (PendingReleaseCount > 0)
+        {
+            parts.Add($"未取得 {PendingReleaseCount} 件");
+        }
+
+        if (PendingPlusCount > 0)
+        {
+            parts.Add($"人数未確定 {PendingPlusCount} 作品");
+        }
+
+        ReleaseInfoButtonText = parts.Count == 0
             ? "作品の情報: 取得済み"
-            : $"作品の情報を取得 (未取得 {PendingReleaseCount} 件・約 {Format.Eta(eta)})";
+            : $"作品の情報を取得 ({string.Join("・", parts)}・約 {Format.Eta(eta)}{(PendingPlusCount > 0 ? "〜" : "")})";
         OnPropertyChanged(nameof(PendingReleaseCount));
+        OnPropertyChanged(nameof(PendingPlusCount));
         CommandManager.InvalidateRequerySuggested();
     }
 
-    /// <summary>一覧の作品ページをまとめて取得して、サポーター数・値段・リリース日を埋める (1 作品 1 リクエスト)。</summary>
+    /// <summary>サポーターが「N+」になっている作品のページ。</summary>
+    private static List<TralbumPage> PlusPages(IEnumerable<BrowseItemViewModel> rows) =>
+        rows.Where(i => i.IsRelease && i.Page is { Supporters.HasMore: true })
+            .Select(i => i.Page!)
+            .DistinctBy(p => BandcampUrls.Normalize(p.Url))
+            .ToList();
+
+    /// <summary>
+    /// 一覧 (絞り込み後) の作品ページをまとめて取得して、サポーター数・値段・リリース日を埋める (1 作品 1 リクエスト)。
+    /// そのあと「N+」の作品の正確なサポーター数を、キューの「曲の情報を取得」と同じ方法で数える。
+    /// </summary>
     private async Task FetchReleaseInfoAsync()
     {
-        var targets = ItemsView.Cast<BrowseItemViewModel>().Where(i => i.IsRelease && i.Page is null).ToList();
-        if (targets.Count == 0)
+        var visible = ItemsView.Cast<BrowseItemViewModel>().ToList();
+        var targets = visible.Where(i => i.IsRelease && i.Page is null).ToList();
+        var plusCount = PlusPages(visible).Count;
+        if ((targets.Count == 0 && plusCount == 0) || !_host.ConfirmManyRequests(targets.Count, plusCount))
         {
             return;
         }
@@ -561,6 +592,7 @@ public sealed class BrowseViewModel : ObservableObject
         _fetchingReleases = true;
         var ct = _host.BeginJob("作品の情報を取得中…");
         var done = 0;
+        var errors = 0;
         try
         {
             foreach (var row in targets)
@@ -579,6 +611,7 @@ public sealed class BrowseViewModel : ObservableObject
                 catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
                 {
                     row.Error = ex.Message;
+                    errors++;
                 }
                 finally
                 {
@@ -588,11 +621,13 @@ public sealed class BrowseViewModel : ObservableObject
                 done++;
             }
 
-            _host.StatusText = $"{done} 作品の情報を取得しました";
+            // 取得したページで新たに「N+」と分かった作品も含めて数える (絞り込み後の一覧だけ)
+            var count = await _host.CountExactSupportersAsync(PlusPages(ItemsView.Cast<BrowseItemViewModel>()), ct);
+            _host.StatusText = MainViewModel.FetchResultText(done, count.Counted, count.Capped, errors + count.Errors);
         }
         catch (OperationCanceledException)
         {
-            _host.StatusText = $"作品の情報の取得を中止しました ({done}/{targets.Count})";
+            _host.StatusText = "作品の情報の取得を中止しました (取得・集計した分は保存されています)";
         }
         finally
         {
@@ -748,6 +783,7 @@ public sealed class BrowseViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(SelectedSummary));
+        UpdatePendingCount();
     }
 
     /// <summary>コレクションが変わったとき。</summary>
