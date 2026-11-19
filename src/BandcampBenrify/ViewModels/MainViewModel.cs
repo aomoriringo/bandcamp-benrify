@@ -192,6 +192,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         CheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), true), p => Selected(p).Any(q => !q.IsChecked));
         UncheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), false), p => Selected(p).Any(q => q.IsChecked));
         CheckCurrentAndNextCommand = new AsyncCommand(CheckCurrentAndNextAsync, () => Current is not null);
+        ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
 
         LoadQueue();
         LoadCachedCollection();
@@ -213,6 +214,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>再生中の曲をチェック済みにして次の曲へ (Ctrl+D)。</summary>
     public ICommand CheckCurrentAndNextCommand { get; }
+
+    public ICommand ToggleMuteCommand { get; }
 
     public int CheckedCount => _checked.Count;
 
@@ -342,7 +345,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _settings.Save();
                 _player.IsLooping = value;
                 OnPropertyChanged();
-                OnPropertyChanged(nameof(PlayModeText));
             }
         }
     }
@@ -487,12 +489,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _settings.Shuffle = value;
                 _settings.Save();
                 OnPropertyChanged();
-                OnPropertyChanged(nameof(PlayModeText));
             }
         }
     }
-
-    public string PlayModeText => RepeatOne ? "1 曲リピート" : Shuffle ? "ランダム再生" : "表示順に再生";
 
     public bool HidePurchased
     {
@@ -592,8 +591,36 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             _player.Volume = value;
             _settings.Volume = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(VolumeGlyph));
+
+            // 消音中に音量を動かしたら、消音は解除する
+            if (IsMuted && value > 0)
+            {
+                IsMuted = false;
+            }
         }
     }
+
+    /// <summary>消音 (音量の値は覚えたまま)。アプリを閉じたら戻る。</summary>
+    public bool IsMuted
+    {
+        get => _player.IsMuted;
+        set
+        {
+            if (_player.IsMuted != value)
+            {
+                _player.IsMuted = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(VolumeGlyph));
+                OnPropertyChanged(nameof(MuteToolTip));
+            }
+        }
+    }
+
+    /// <summary>音量アイコン (消音中は斜線、それ以外は音量に応じて波の数が変わる)。</summary>
+    public string VolumeGlyph => IsMuted || Volume <= 0 ? "" : Volume < 0.34 ? "" : Volume < 0.67 ? "" : "";
+
+    public string MuteToolTip => IsMuted ? "消音を解除 (Ctrl+M)" : "消音 (Ctrl+M)";
 
     /// <summary>シークバーをドラッグ中はタイマーで位置を上書きしない。</summary>
     public bool IsSeeking { get; set; }
@@ -640,8 +667,16 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public string NowBpmText
     {
         get => _nowBpmText;
-        private set => Set(ref _nowBpmText, value);
+        private set
+        {
+            if (Set(ref _nowBpmText, value))
+            {
+                OnPropertyChanged(nameof(HasNowBpmText));
+            }
+        }
     }
+
+    public bool HasNowBpmText => NowBpmText.Length > 0;
 
     public string? NowBpmToolTip
     {

@@ -14,6 +14,7 @@
         <KeyBinding Key="Right" Modifiers="Ctrl" Command="{Binding NextCommand}" />
         <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding PreviousCommand}" />
         <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding CheckCurrentAndNextCommand}" />
+        <KeyBinding Key="M" Modifiers="Ctrl" Command="{Binding ToggleMuteCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -205,9 +206,10 @@
         <Border x:Name="PlayerBar" DockPanel.Dock="Bottom" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="16,12">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" MinWidth="300" />
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" MinWidth="260" />
+                    <!-- 左右を同じ幅にして、操作と波形がウィンドウの中央に来るようにする -->
+                    <ColumnDefinition Width="*" MinWidth="320" />
+                    <ColumnDefinition Width="2*" MinWidth="480" />
+                    <ColumnDefinition Width="*" MinWidth="320" />
                 </Grid.ColumnDefinitions>
 
                 <!-- 曲の情報 -->
@@ -233,7 +235,14 @@
                 </Grid>
 
                 <!-- 操作とシークバー -->
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Width="520">
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="12,0">
+                    <!-- ボタンは中央、推定 BPM は同じ行の右端 (波形の右端にそろえる)。重ねて置くのでボタンの中央はずれない -->
+                    <Grid>
+                    <Border HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,62,0" Padding="12,4" CornerRadius="12"
+                            Background="#1AFFFFFF" ToolTip="{Binding NowBpmToolTip}"
+                            Visibility="{Binding HasNowBpmText, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding NowBpmText}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
+                    </Border>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                         <ToggleButton x:Name="ShuffleToggle" AutomationProperties.Name="ランダム再生" Style="{StaticResource IconToggle}" Content="&#xE8B1;" IsChecked="{Binding Shuffle}"
                                       ToolTip="オン: キュー全体からランダム / オフ: 表示の順番 (並び替えた順) に上から再生" />
@@ -244,14 +253,15 @@
                         <ToggleButton x:Name="RepeatOneToggle" AutomationProperties.Name="1曲リピート" Style="{StaticResource IconToggle}" Content="&#xE8ED;" IsChecked="{Binding RepeatOne}"
                                       ToolTip="1 曲リピート: 今の曲を繰り返し再生します (「次へ」で次の曲に進めます)" />
                     </StackPanel>
-                    <Grid Margin="0,6,0,0">
+                    </Grid>
+                    <!-- 左右の欄は同じ幅 (波形がボタンの真下に来る) -->
+                    <Grid Margin="0,6,0,0" Grid.IsSharedSizeScope="True">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="SeekSide" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" SharedSizeGroup="SeekSide" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="40" TextAlignment="Right" />
+                        <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="52" TextAlignment="Right" />
                         <!-- 波形 (再生した曲を解析して描く。解析前は普通のシークバーの見た目) と、その上に重ねた透明なシークバー -->
                         <infra:WaveformView x:Name="Waveform" Grid.Column="1" Margin="10,0" Height="36"
                                             Peaks="{Binding NowPeaks}" Duration="{Binding Duration}" Position="{Binding Value, ElementName=SeekBar}"
@@ -272,25 +282,21 @@
                                 IsMoveToPointEnabled="True"
                                 Thumb.DragStarted="SeekBar_DragStarted" Thumb.DragCompleted="SeekBar_DragCompleted"
                                 PreviewMouseLeftButtonUp="SeekBar_MouseUp" />
-                        <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="40" />
-                        <TextBlock Grid.Column="3" Text="{Binding NowBpmText}" ToolTip="{Binding NowBpmToolTip}" VerticalAlignment="Center"
-                                   Foreground="{StaticResource DimTextBrush}" FontSize="12" Margin="4,0,0,0" MinWidth="56" />
+                        <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="52" />
                     </Grid>
                 </StackPanel>
 
                 <!-- チェックして次へ・音量 -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <StackPanel VerticalAlignment="Center" Margin="0,0,4,0">
-                        <Button x:Name="CheckNextButton" AutomationProperties.Name="チェックして次へ" Style="{StaticResource PillButton}" Padding="12,5"
-                                Command="{Binding CheckCurrentAndNextCommand}" ToolTip="今の曲をチェック済みにして次の曲へ (Ctrl+D)">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE73E;" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" />
-                                <TextBlock Text="チェックして次へ" FontSize="12" />
-                            </StackPanel>
-                        </Button>
-                        <TextBlock Text="{Binding PlayModeText}" HorizontalAlignment="Center" FontSize="11" Foreground="{StaticResource DimTextBrush}" Margin="6,4,0,0" />
-                    </StackPanel>
-                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE767;" VerticalAlignment="Center" Foreground="{StaticResource SubTextBrush}" Margin="18,0,8,0" />
+                    <Button x:Name="CheckNextButton" AutomationProperties.Name="チェックして次へ" Style="{StaticResource PillButton}" Padding="22,11" VerticalAlignment="Center"
+                            Command="{Binding CheckCurrentAndNextCommand}" ToolTip="今の曲をチェック済みにして次の曲へ (Ctrl+D)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE73E;" VerticalAlignment="Center" Margin="0,0,8,0" FontSize="15" />
+                            <TextBlock Text="チェックして次へ" FontSize="15" />
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="MuteButton" AutomationProperties.Name="消音" Style="{StaticResource IconButton}" Content="{Binding VolumeGlyph}" Margin="20,0,4,0"
+                            Command="{Binding ToggleMuteCommand}" ToolTip="{Binding MuteToolTip}" />
                     <Slider x:Name="VolumeSlider" AutomationProperties.Name="音量" Width="110" Minimum="0" Maximum="1" Value="{Binding Volume}" VerticalAlignment="Center" ToolTip="音量"
                             Style="{StaticResource PlayerSlider}" IsMoveToPointEnabled="True" />
                 </StackPanel>

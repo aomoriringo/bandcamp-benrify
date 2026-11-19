@@ -73,6 +73,12 @@ public sealed class AudioPlayer : IDisposable
         set => _player.Volume = Math.Clamp(value, 0, 1);
     }
 
+    public bool IsMuted
+    {
+        get => _player.IsMuted;
+        set => _player.IsMuted = value;
+    }
+
     /// <summary>1 曲リピート (曲の最後まで行ったら頭から再生し、Ended は発生しない)。</summary>
     public bool IsLooping
     {
