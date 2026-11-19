@@ -63,24 +63,21 @@ public sealed class DiskCache
         }
     }
 
-    public long SizeBytes()
+    /// <summary>指定した種類 (名前空間) のキャッシュの合計サイズ。</summary>
+    public long SizeBytes(string ns)
     {
-        if (!Directory.Exists(_root))
-        {
-            return 0;
-        }
-
-        return new DirectoryInfo(_root).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length);
+        var dir = Path.Combine(_root, ns);
+        return Directory.Exists(dir) ? new DirectoryInfo(dir).EnumerateFiles("*", SearchOption.AllDirectories).Sum(f => f.Length) : 0;
     }
 
-    public void Clear()
+    /// <summary>指定した種類 (名前空間) のキャッシュを消す。ほかの種類は残す。</summary>
+    public void Clear(string ns)
     {
-        if (Directory.Exists(_root))
+        var dir = Path.Combine(_root, ns);
+        if (Directory.Exists(dir))
         {
-            Directory.Delete(_root, recursive: true);
+            Directory.Delete(dir, recursive: true);
         }
-
-        Directory.CreateDirectory(_root);
     }
 
     private string PathFor(string ns, string key)

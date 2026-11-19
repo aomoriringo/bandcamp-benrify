@@ -6,6 +6,19 @@ namespace BandcampBenrify.Core;
 
 public sealed record ResolveProgress(int Done, int Total, string? Current, string? Error = null, bool NoAudio = false);
 
+/// <summary>キャッシュの種類 (設定画面で種類ごとに使用量を出し、消せるようにする)。</summary>
+public enum CacheKind
+{
+    /// <summary>アルバム / 曲ページ (サポーター数・値段・曲目。数えた正確なサポーター数も含む)。</summary>
+    Pages,
+
+    /// <summary>レーベル / アーティストの作品一覧。</summary>
+    Discographies,
+
+    /// <summary>自分のコレクション (購入済みマーク)。</summary>
+    Collection,
+}
+
 /// <summary>
 /// Bandcamp のデータ取得窓口。すべてのリクエストは <see cref="ThrottledHttpClient"/> を経由し、結果は <see cref="DiskCache"/> に保存する。
 /// </summary>
@@ -15,6 +28,9 @@ public sealed class BandcampClient
     private const string TralbumNs = "tralbum-v2";
     private const string DiscographyNs = "discography";
     private const string CollectionNs = "collection";
+
+    // 古い版の保存形式 (もう読まない)。作品ページのキャッシュとして数え、一緒に消す
+    private const string LegacyTralbumNs = "tralbum";
 
     private readonly ThrottledHttpClient _http;
     private readonly DiskCache _cache;
@@ -46,6 +62,30 @@ public sealed class BandcampClient
 
     /// <summary>リクエスト 1 件あたりの目安時間 (残り時間の見積もり用)。</summary>
     public TimeSpan EstimatedTimePerRequest => _http.MinInterval + TimeSpan.FromSeconds(0.5);
+
+    private static string[] NamespacesOf(CacheKind kind) => kind switch
+    {
+        CacheKind.Pages => [TralbumNs, LegacyTralbumNs],
+        CacheKind.Discographies => [DiscographyNs],
+        _ => [CollectionNs],
+    };
+
+    /// <summary>種類ごとのキャッシュの使用量 (バイト)。</summary>
+    public long CacheSize(CacheKind kind) => NamespacesOf(kind).Sum(_cache.SizeBytes);
+
+    /// <summary>種類を指定してキャッシュを消す (ほかの種類は残す)。</summary>
+    public void ClearCache(CacheKind kind)
+    {
+        foreach (var ns in NamespacesOf(kind))
+        {
+            _cache.Clear(ns);
+        }
+
+        if (kind == CacheKind.Pages)
+        {
+            _memory.Clear();
+        }
+    }
 
     private CacheEntry<TralbumPage>? GetEntry(string url)
     {

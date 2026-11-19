@@ -37,7 +37,7 @@ public sealed class AppSettings
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     /// <summary>Bandcamp へのリクエスト間隔 (秒)。1 秒未満は 1 秒に切り上げる。</summary>
-    public double RequestIntervalSeconds { get; set; } = 2.5;
+    public double RequestIntervalSeconds { get; set; } = 5;
 
     /// <summary>アルバム / 曲ページのキャッシュ有効時間。</summary>
     public double PageCacheHours { get; set; } = 72;

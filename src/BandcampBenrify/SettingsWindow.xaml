@@ -73,15 +73,55 @@
         <TextBlock Text="間隔を短くすると速くなりますが、Bandcamp への負荷が増えます。1 秒未満にはできません。" Style="{StaticResource Note}" />
         <StackPanel Orientation="Horizontal">
             <TextBox x:Name="IntervalBox" Width="70" Padding="8,4" AutomationProperties.Name="リクエスト間隔" />
-            <TextBlock Text="秒 (既定 2.5)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{StaticResource SubTextBrush}" />
+            <TextBlock Text="秒 (既定 5)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{StaticResource SubTextBrush}" />
         </StackPanel>
 
         <TextBlock Text="キャッシュ" Style="{StaticResource Heading}" />
         <TextBlock Text="取得済みのページを保存し、同じページへの重複したリクエストを防ぎます。" Style="{StaticResource Note}" />
-        <DockPanel>
-            <Button x:Name="ClearCacheButton" DockPanel.Dock="Right" Content="キャッシュを削除" Click="ClearCache_Click" Style="{StaticResource PillButton}" />
-            <TextBlock x:Name="CacheText" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" TextWrapping="Wrap" />
-        </DockPanel>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Grid.Resources>
+                <Style x:Key="CacheName" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="Foreground" Value="{StaticResource SubTextBrush}" />
+                </Style>
+                <Style x:Key="CacheSize" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="HorizontalAlignment" Value="Right" />
+                    <Setter Property="Margin" Value="16,0,12,0" />
+                    <Setter Property="Foreground" Value="{StaticResource MutedText}" />
+                </Style>
+                <Style x:Key="CacheClear" TargetType="Button" BasedOn="{StaticResource PillButton}">
+                    <Setter Property="Content" Value="削除" />
+                    <Setter Property="MinWidth" Value="64" />
+                    <Setter Property="Margin" Value="0,3" />
+                </Style>
+            </Grid.Resources>
+
+            <TextBlock Text="作品ページ (サポーター数・値段・曲目)" Style="{StaticResource CacheName}" />
+            <TextBlock x:Name="PagesCacheText" Grid.Column="1" Style="{StaticResource CacheSize}" />
+            <Button x:Name="ClearPagesCacheButton" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Pages"
+                    AutomationProperties.Name="作品ページのキャッシュを削除" />
+
+            <TextBlock Grid.Row="1" Text="作品一覧 (レーベル・アーティスト)" Style="{StaticResource CacheName}" />
+            <TextBlock x:Name="DiscographiesCacheText" Grid.Row="1" Grid.Column="1" Style="{StaticResource CacheSize}" />
+            <Button x:Name="ClearDiscographiesCacheButton" Grid.Row="1" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Discographies"
+                    AutomationProperties.Name="作品一覧のキャッシュを削除" />
+
+            <TextBlock Grid.Row="2" Text="コレクション (購入済みマーク)" Style="{StaticResource CacheName}" />
+            <TextBlock x:Name="CollectionCacheText" Grid.Row="2" Grid.Column="1" Style="{StaticResource CacheSize}" />
+            <Button x:Name="ClearCollectionCacheButton" Grid.Row="2" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Collection"
+                    AutomationProperties.Name="コレクションのキャッシュを削除" />
+        </Grid>
 
         <DockPanel Margin="0,28,0,0">
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">

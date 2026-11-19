@@ -128,17 +128,51 @@ public partial class SettingsWindow : Window
 
     private void UpdateCacheText()
     {
-        CacheText.Text = $"使用量: {_vm.CacheSizeBytes / 1024.0 / 1024.0:0.0} MB";
+        foreach (var (kind, text, button) in new[]
+                 {
+                     (CacheKind.Pages, PagesCacheText, ClearPagesCacheButton),
+                     (CacheKind.Discographies, DiscographiesCacheText, ClearDiscographiesCacheButton),
+                     (CacheKind.Collection, CollectionCacheText, ClearCollectionCacheButton),
+                 })
+        {
+            var bytes = _vm.CacheSize(kind);
+            text.Text = FormatSize(bytes);
+            button.IsEnabled = bytes > 0;
+        }
     }
+
+    private static string FormatSize(long bytes) =>
+        bytes == 0 ? "なし"
+        : bytes < 1024 * 1024 ? $"{Math.Max(1, bytes / 1024)} KB"
+        : $"{bytes / 1024.0 / 1024.0:0.0} MB";
 
     private void ClearCache_Click(object sender, RoutedEventArgs e)
     {
-        if (MessageBox.Show(this, "キャッシュを削除すると、サポーター数などを表示するために再度ページを取得する必要があります。削除しますか？",
-                "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+        if (sender is not FrameworkElement { Tag: string tag } || !Enum.TryParse<CacheKind>(tag, out var kind))
         {
-            _vm.ClearCache();
+            return;
+        }
+
+        var message = kind switch
+        {
+            CacheKind.Pages => "作品ページのキャッシュを削除します。\nサポーター数・値段などを表示するには、ページを取得し直す必要があります (1 ページ 1 回のアクセス)。数えた正確なサポーター数も消えます。\n削除しますか？",
+            CacheKind.Discographies => "作品一覧のキャッシュを削除します。\nレーベル・アーティストを次に開くとき、作品一覧を取得し直します (1 回のアクセス)。\n削除しますか？",
+            _ => CollectionMessage(),
+        };
+        if (MessageBox.Show(this, message, "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+        {
+            _vm.ClearCache(kind);
             UpdateCacheText();
         }
+    }
+
+    private string CollectionMessage()
+    {
+        var count = _vm.CachedCollectionCount;
+        var requests = (count + BandcampClient.CollectionBatchSize - 1) / BandcampClient.CollectionBatchSize;
+        return "コレクションのキャッシュを削除します。\n購入済みマークが消えます。戻すには「コレクション更新」で全件を読み込み直します"
+               + (count > 0 ? $" ({count} 件なので約 {requests} 回のアクセス)" : $" ({BandcampClient.CollectionBatchSize} 件ごとに 1 回のアクセス)")
+               + "。\n削除しますか？";
     }
 
     private void Ok_Click(object sender, RoutedEventArgs e)

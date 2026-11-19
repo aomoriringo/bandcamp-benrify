@@ -504,13 +504,36 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public bool HasProfile => !string.IsNullOrEmpty(BandcampUsername);
 
-    public long CacheSizeBytes => _cache.SizeBytes();
+    public long CacheSize(CacheKind kind) => _client.CacheSize(kind);
 
-    public void ClearCache()
+    /// <summary>種類を指定してキャッシュを消し、表示 (サポーター数・購入済みマークなど) を消した状態に合わせる。</summary>
+    public void ClearCache(CacheKind kind)
     {
-        _cache.Clear();
-        StatusText = "キャッシュを削除しました";
+        _client.ClearCache(kind);
+        switch (kind)
+        {
+            case CacheKind.Pages:
+                foreach (var item in Queue)
+                {
+                    RefreshItem(item);
+                }
+
+                Browse.RefreshAll();
+                UpdatePendingCount();
+                StatusText = "作品ページのキャッシュを削除しました";
+                break;
+            case CacheKind.Discographies:
+                StatusText = "作品一覧のキャッシュを削除しました";
+                break;
+            case CacheKind.Collection:
+                LoadCachedCollection();
+                StatusText = "コレクションのキャッシュを削除しました (購入済みマークは「コレクション更新」で戻せます)";
+                break;
+        }
     }
+
+    /// <summary>読み込み済みのコレクションの件数 (キャッシュ削除の確認に使う)。</summary>
+    public int CachedCollectionCount => _client.TryGetCachedCollection(BandcampUsername)?.Count ?? 0;
 
     /// <summary>設定画面から。プロフィールが変わったらコレクションを読み込み直す。</summary>
     public void ApplySettings(string username, double requestIntervalSeconds)

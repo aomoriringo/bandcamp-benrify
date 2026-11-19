@@ -122,6 +122,28 @@ public sealed class SupportersTests : IDisposable
     }
 
     [Fact]
+    public async Task ClearingPageCacheKeepsOtherKinds()
+    {
+        var fake = new FakeAlbum(total: 50, shown: 50, perPage: 100);
+        var (client, http) = Create(fake);
+        using (http)
+        {
+            await client.GetTralbumAsync(AlbumUrl, RequestPriority.Interactive);
+            new DiskCache(_dir).Set("collection", "someone", "x", DateTimeOffset.UtcNow);
+            Assert.True(client.CacheSize(CacheKind.Pages) > 0);
+            var collectionSize = client.CacheSize(CacheKind.Collection);
+            Assert.True(collectionSize > 0);
+
+            client.ClearCache(CacheKind.Pages);
+
+            // ディスクからもメモリからも消え、ほかの種類は残る
+            Assert.Equal(0, client.CacheSize(CacheKind.Pages));
+            Assert.Null(client.TryGetCachedTralbum(AlbumUrl));
+            Assert.Equal(collectionSize, client.CacheSize(CacheKind.Collection));
+        }
+    }
+
+    [Fact]
     public async Task RefetchKeepsCountedSupportersAndAddsNewOnes()
     {
         var fake = new FakeAlbum(total: 200, shown: 80, perPage: 100);
