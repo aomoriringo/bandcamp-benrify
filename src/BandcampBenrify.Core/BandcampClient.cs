@@ -12,7 +12,7 @@ public enum CacheKind
     /// <summary>アルバム / 曲ページ (サポーター数・値段・曲目。数えた正確なサポーター数も含む)。</summary>
     Pages,
 
-    /// <summary>レーベル / アーティストの作品一覧。</summary>
+    /// <summary>レーベル / アーティストの作品一覧と、「探す」で開いたファンのコレクション / ウィッシュリスト。</summary>
     Discographies,
 
     /// <summary>自分のコレクション (購入済みマーク)。</summary>
@@ -28,6 +28,8 @@ public sealed class BandcampClient
     private const string TralbumNs = "tralbum-v2";
     private const string DiscographyNs = "discography";
     private const string CollectionNs = "collection";
+
+    private const string FanListNs = "fanlist";
 
     // 古い版の保存形式 (もう読まない)。作品ページのキャッシュとして数え、一緒に消す
     private const string LegacyTralbumNs = "tralbum";
@@ -66,7 +68,7 @@ public sealed class BandcampClient
     private static string[] NamespacesOf(CacheKind kind) => kind switch
     {
         CacheKind.Pages => [TralbumNs, LegacyTralbumNs],
-        CacheKind.Discographies => [DiscographyNs],
+        CacheKind.Discographies => [DiscographyNs, FanListNs],
         _ => [CollectionNs],
     };
 
@@ -476,4 +478,69 @@ public sealed class BandcampClient
 
     /// <summary>コレクション 1 リクエストあたりの件数 (Bandcamp 側の上限)。</summary>
     public const int CollectionBatchSize = 20;
+
+    // ---- ほかのファンのコレクション / ウィッシュリスト (「探す」で開く) ----
+
+    private static string FanListKey(string username, FanListKind kind) => $"{username.ToLowerInvariant()}/{kind}";
+
+    /// <summary>
+    /// ほかのファンのコレクション / ウィッシュリストを開く (ファンページ 1 回。最初の 20 件程度)。
+    /// 作品一覧と同じ時間はキャッシュを使い、前に続きを読んでいればその分も残す。
+    /// </summary>
+    public async Task<FanList> GetFanListAsync(string username, FanListKind kind, CancellationToken ct = default)
+    {
+        var key = FanListKey(username, kind);
+        var cached = _cache.TryGet<FanList>(FanListNs, key);
+        if (cached is not null && _now() - cached.SavedAt <= DiscographyTtl)
+        {
+            return cached.Value;
+        }
+
+        var result = await _http.GetAsync(BandcampUrls.FanListPage(username, kind), RequestPriority.Interactive, ct).ConfigureAwait(false);
+        var list = BandcampParser.ParseFanList(result.Body, username, kind, _now());
+
+        // 前に続きを読んでいたら、その分と続きの位置を引き継ぐ (新しく増えた分はページの先頭に載る)
+        if (cached?.Value is { } old && old.FanId == list.FanId && old.Items.Count > list.Items.Count)
+        {
+            var seen = list.Items.Select(i => (i.Type, i.Id)).ToHashSet();
+            list = list with
+            {
+                Items = [.. list.Items, .. old.Items.Where(i => seen.Add((i.Type, i.Id)))],
+                ResumeToken = old.ResumeToken,
+            };
+        }
+
+        _cache.Set(FanListNs, key, list, list.FetchedAt);
+        return list;
+    }
+
+    /// <summary>
+    /// コレクション / ウィッシュリストの続きを読む (1 回 20 件、最大 maxRequests 回)。
+    /// 読んだ分は進むたびに通知し、中止してもそこまでを保存する。
+    /// </summary>
+    public async Task<FanList> LoadMoreFanListAsync(FanList list, int maxRequests, IProgress<FanList>? progress = null, CancellationToken ct = default)
+    {
+        var endpoint = list.Kind == FanListKind.Wishlist ? "wishlist_items" : "collection_items";
+        var items = list.Items.ToList();
+        var seen = items.Select(i => (i.Type, i.Id)).ToHashSet();
+        var current = list;
+        try
+        {
+            for (var i = 0; i < maxRequests && current.ResumeToken is { } token; i++)
+            {
+                var body = JsonSerializer.Serialize(new { fan_id = list.FanId, older_than_token = token, count = CollectionBatchSize });
+                var page = await _http.PostJsonAsync($"https://bandcamp.com/api/fancollection/1/{endpoint}", body, RequestPriority.Background, ct).ConfigureAwait(false);
+                var (batch, more, next) = BandcampParser.ParseFanListItems(page.Body);
+                items.AddRange(batch.Where(b => seen.Add((b.Type, b.Id))));
+                current = current with { Items = items.ToList(), ResumeToken = more && batch.Count > 0 ? next : null };
+                progress?.Report(current);
+            }
+        }
+        finally
+        {
+            _cache.Set(FanListNs, FanListKey(list.Username, list.Kind), current, list.FetchedAt);
+        }
+
+        return current;
+    }
 }

@@ -323,6 +323,73 @@ public static partial class BandcampParser
         return (items, GetBool(root, "more_available") ?? false, GetString(root, "last_token"));
     }
 
+    /// <summary>ほかのファンのコレクション / ウィッシュリストのページ (最初の 20 件程度と続きのトークン)。</summary>
+    public static FanList ParseFanList(string html, string username, FanListKind kind, DateTimeOffset now)
+    {
+        var doc = Parser.ParseDocument(html);
+        var blob = doc.GetElementById("pagedata")?.GetAttribute("data-blob")
+            ?? throw new BandcampParseException("ファンページのデータが見つかりません。URL を確認してください。");
+        using var json = JsonDocument.Parse(blob);
+        var root = json.RootElement;
+        var fanData = root.TryGetProperty("fan_data", out var f) ? f : default;
+        var fanId = GetLong(fanData, "fan_id") ?? throw new BandcampParseException("ファン ID が見つかりません。URL を確認してください。");
+        var name = kind == FanListKind.Wishlist ? "wishlist" : "collection";
+        var data = root.TryGetProperty(name + "_data", out var d) ? d : default;
+
+        var items = new List<DiscographyItem>();
+        if (root.TryGetProperty("item_cache", out var cache) && cache.TryGetProperty(name, out var list) && list.ValueKind == JsonValueKind.Object)
+        {
+            items.AddRange(list.EnumerateObject().Select(p => ToFanListItem(p.Value)).OfType<DiscographyItem>());
+        }
+
+        return new FanList
+        {
+            Username = GetString(fanData, "username") ?? username,
+            FanName = GetString(fanData, "name") is { Length: > 0 } n ? n : username,
+            Kind = kind,
+            FanId = fanId,
+            ItemCount = (int)(GetLong(data, "item_count") ?? items.Count),
+            Items = items.DistinctBy(i => (i.Type, i.Id)).ToList(),
+            ResumeToken = GetString(data, "last_token"),
+            FetchedAt = now,
+        };
+    }
+
+    /// <summary>コレクション / ウィッシュリストの続き (fancollection API の応答) を、作品として解析する。</summary>
+    public static (List<DiscographyItem> Items, bool MoreAvailable, string? LastToken) ParseFanListItems(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (GetBool(root, "error") == true)
+        {
+            throw new BandcampParseException(GetString(root, "error_message") ?? "一覧の取得に失敗しました");
+        }
+
+        var items = root.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array
+            ? arr.EnumerateArray().Select(ToFanListItem).OfType<DiscographyItem>().ToList()
+            : [];
+        return (items, GetBool(root, "more_available") ?? false, GetString(root, "last_token"));
+    }
+
+    /// <summary>コレクションの 1 件を作品 (アルバム / 曲) にする。グッズなど URL の無いものは除く。</summary>
+    private static DiscographyItem? ToFanListItem(JsonElement e)
+    {
+        if (ToCollectionItem(e) is not { } c || GetString(e, "item_url") is not { Length: > 0 } url)
+        {
+            return null;
+        }
+
+        return new DiscographyItem
+        {
+            Type = c.Type,
+            Id = c.Id,
+            Title = GetString(e, "item_title") ?? "",
+            Artist = GetString(e, "band_name") ?? "",
+            Url = url,
+            ArtUrl = BandcampUrls.ArtUrl(GetLong(e, "item_art_id"), ArtSize.Small) is { Length: > 0 } art ? art : null,
+        };
+    }
+
     private static CollectionItem? ToCollectionItem(JsonElement e)
     {
         var id = GetLong(e, "tralbum_id") ?? GetLong(e, "item_id");

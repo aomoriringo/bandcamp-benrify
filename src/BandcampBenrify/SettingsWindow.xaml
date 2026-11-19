@@ -112,7 +112,7 @@
             <Button x:Name="ClearPagesCacheButton" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Pages"
                     AutomationProperties.Name="作品ページのキャッシュを削除" />
 
-            <TextBlock Grid.Row="1" Text="作品一覧 (レーベル・アーティスト)" Style="{StaticResource CacheName}" />
+            <TextBlock Grid.Row="1" Text="作品一覧 (レーベル・アーティスト・ファン)" Style="{StaticResource CacheName}" />
             <TextBlock x:Name="DiscographiesCacheText" Grid.Row="1" Grid.Column="1" Style="{StaticResource CacheSize}" />
             <Button x:Name="ClearDiscographiesCacheButton" Grid.Row="1" Grid.Column="2" Style="{StaticResource CacheClear}" Click="ClearCache_Click" Tag="Discographies"
                     AutomationProperties.Name="作品一覧のキャッシュを削除" />

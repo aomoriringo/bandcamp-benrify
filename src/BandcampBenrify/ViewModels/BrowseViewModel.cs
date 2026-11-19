@@ -181,6 +181,17 @@ public sealed class BrowseViewModel : ObservableObject
     private string _releaseInfoButtonText = "";
     private bool _isBusy;
 
+    /// <summary>開いているファンのコレクション / ウィッシュリスト (それ以外を開いているときは null)。</summary>
+    private FanList? _fanList;
+    private bool _loadingFan;
+    private CancellationTokenSource? _fanCts;
+
+    /// <summary>一覧を開き直すたびに増やす (読み込み中に別の一覧を開いたら、古い結果を捨てるため)。</summary>
+    private int _loadVersion;
+
+    /// <summary>「続きを読み込む」1 回で送るリクエストの数 (1 回 20 件)。一度に大量に読まないよう小分けにする。</summary>
+    private const int FanRequestsPerLoad = 10;
+
     public BrowseViewModel(MainViewModel host, BandcampClient client)
     {
         _host = host;
@@ -201,6 +212,7 @@ public sealed class BrowseViewModel : ObservableObject
         ItemsView = view;
 
         BackCommand = new AsyncCommand(BackAsync, () => _history.Count > 0);
+        LoadMoreFanCommand = new AsyncCommand(LoadMoreFanAsync, () => _fanList is { HasMore: true } && !_loadingFan);
         FetchReleaseInfoCommand = new AsyncCommand(FetchReleaseInfoAsync, () => (PendingReleaseCount > 0 || PendingPlusCount > 0) && !_fetchingReleases && !_host.IsFetchingDetails);
         OpenItemCommand = new AsyncCommand(p => p is BrowseItemViewModel { Kind: SearchKind.Band } b ? OpenAsync(b.Url) : Task.CompletedTask);
         AddReleasesCommand = new AsyncCommand(p => AddReleasesAsync(SelectedReleases(p)), p => SelectedReleases(p).Count > 0);
@@ -234,6 +246,28 @@ public sealed class BrowseViewModel : ObservableObject
     public ObservableCollection<QueueItemViewModel> Tracks { get; } = [];
 
     public ICommand BackCommand { get; }
+
+    /// <summary>ファンのコレクション / ウィッシュリストの続きを読む。</summary>
+    public ICommand LoadMoreFanCommand { get; }
+
+    /// <summary>ファンの一覧を開いていて、まだ続きがある。</summary>
+    public bool HasMoreFanItems => _fanList is { HasMore: true };
+
+    public string LoadMoreFanText
+    {
+        get
+        {
+            if (_fanList is not { HasMore: true } list)
+            {
+                return "";
+            }
+
+            var remaining = list.ItemCount - list.Items.Count;
+            var requests = Math.Min(FanRequestsPerLoad, (remaining + BandcampClient.CollectionBatchSize - 1) / BandcampClient.CollectionBatchSize);
+            var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * requests);
+            return $"続きを読み込む (+{Math.Min(remaining, requests * BandcampClient.CollectionBatchSize)} 件・約 {Format.Eta(eta)})";
+        }
+    }
 
     public ICommand FetchReleaseInfoCommand { get; }
 
@@ -435,7 +469,17 @@ public sealed class BrowseViewModel : ObservableObject
         var ct = StartLoad();
         try
         {
-            if (BandcampUrls.Classify(url) == UrlKind.Band)
+            if (BandcampUrls.ParseFanList(url) is { } fan)
+            {
+                Title = "一覧を読み込み中…";
+                var version = _loadVersion;
+                var list = await _client.GetFanListAsync(fan.Username, fan.Kind, ct);
+                if (version == _loadVersion)
+                {
+                    ShowFanList(list);
+                }
+            }
+            else if (BandcampUrls.Classify(url) == UrlKind.Band)
             {
                 Title = "作品一覧を読み込み中…";
                 var disco = await _client.GetDiscographyAsync(url, RequestPriority.Interactive, ct: ct);
@@ -485,7 +529,101 @@ public sealed class BrowseViewModel : ObservableObject
         SelectedItem = null;
         Items.Clear();
         Tracks.Clear();
+        _loadVersion++;
+        _fanCts?.Cancel();
+        SetFanList(null);
         return _loadCts.Token;
+    }
+
+    // ---- ファンのコレクション / ウィッシュリスト ----
+
+    private void SetFanList(FanList? list)
+    {
+        _fanList = list;
+        OnPropertyChanged(nameof(HasMoreFanItems));
+        OnPropertyChanged(nameof(LoadMoreFanText));
+        CommandManager.InvalidateRequerySuggested();
+        if (list is not null)
+        {
+            Title = $"{list.FanName} の{(list.Kind == FanListKind.Wishlist ? "ウィッシュリスト" : "コレクション")} — {list.Items.Count}/{list.ItemCount} 件";
+        }
+    }
+
+    private static BrowseItemViewModel ToRow(DiscographyItem i) =>
+        new(i.Type == ItemType.Album ? SearchKind.Album : SearchKind.Track, i.Id, i.Title, i.Artist, i.Url, i.ArtUrl);
+
+    private void ShowFanList(FanList list)
+    {
+        SetItems(list.Items.Select(ToRow));
+        SetFanList(list);
+    }
+
+    /// <summary>読み込んだ続きを一覧の末尾に足す (一覧は読み込んだ順のまま)。何度呼んでも同じ結果になる。</summary>
+    private void AppendFanList(FanList list)
+    {
+        foreach (var item in list.Items.Skip(Items.Count))
+        {
+            var row = ToRow(item);
+            Refresh(row);
+            Items.Add(row);
+        }
+
+        SetFanList(list);
+    }
+
+    /// <summary>
+    /// コレクション / ウィッシュリストの続きを読む。1 回あたり <see cref="FanRequestsPerLoad"/> リクエスト (200 件) までにして、
+    /// 何千件もの一覧を一度に読みに行かないようにする。
+    /// </summary>
+    private async Task LoadMoreFanAsync()
+    {
+        if (_fanList is not { HasMore: true } list)
+        {
+            return;
+        }
+
+        var version = _loadVersion;
+        var before = list.Items.Count;
+        _loadingFan = true;
+        CommandManager.InvalidateRequerySuggested();
+        // 別の一覧を開いたら読み込みも止める (ジョブ欄の中止でも止まる)
+        _fanCts = CancellationTokenSource.CreateLinkedTokenSource(_host.BeginJob("一覧の続きを読み込み中…"));
+        var ct = _fanCts.Token;
+        var progress = new Progress<FanList>(l =>
+        {
+            if (version == _loadVersion)
+            {
+                AppendFanList(l);
+                _host.ReportJob($"一覧の続きを読み込み中 {l.Items.Count}/{l.ItemCount} 件", (double)l.Items.Count / Math.Max(1, l.ItemCount));
+            }
+        });
+        try
+        {
+            var result = await _client.LoadMoreFanListAsync(list, FanRequestsPerLoad, progress, ct);
+            if (version == _loadVersion)
+            {
+                AppendFanList(result);
+                _host.StatusText = $"{result.Items.Count - before} 件を読み込みました ({result.Items.Count}/{result.ItemCount} 件)";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (version == _loadVersion)
+            {
+                _host.StatusText = "読み込みを中止しました (読み込んだ分は保存されています)";
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or BandcampParseException or JsonException)
+        {
+            _host.StatusText = "続きを読み込めませんでした: " + ex.Message;
+        }
+        finally
+        {
+            _loadingFan = false;
+            _host.EndJob();
+            UpdatePendingCount();
+            CommandManager.InvalidateRequerySuggested();
+        }
     }
 
     private void SetItems(IEnumerable<BrowseItemViewModel> rows)

@@ -156,7 +156,7 @@ public partial class SettingsWindow : Window
         var message = kind switch
         {
             CacheKind.Pages => "作品ページのキャッシュを削除します。\nサポーター数・値段などを表示するには、ページを取得し直す必要があります (1 ページ 1 回のアクセス)。数えた正確なサポーター数も消えます。\n削除しますか？",
-            CacheKind.Discographies => "作品一覧のキャッシュを削除します。\nレーベル・アーティストを次に開くとき、作品一覧を取得し直します (1 回のアクセス)。\n削除しますか？",
+            CacheKind.Discographies => "作品一覧のキャッシュを削除します。\nレーベル・アーティスト・ファンのページを次に開くとき、一覧を取得し直します (1 回のアクセス。ファンの一覧で読み込んだ続きも消えます)。\n削除しますか？",
             _ => CollectionMessage(),
         };
         if (MessageBox.Show(this, message, "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)

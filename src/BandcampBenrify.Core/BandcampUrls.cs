@@ -91,6 +91,40 @@ public static class BandcampUrls
         return s.Length > 0 && s.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.') ? s : null;
     }
 
+    // bandcamp.com 直下でユーザー名ではないもの
+    private static readonly HashSet<string> NonFanPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "discover", "tag", "search", "music", "about", "help", "artists", "fans", "labels", "login", "signup", "settings",
+        "terms_of_use", "privacy", "api", "daily", "feed", "gift_cards", "yum", "redeem", "pricing", "cart",
+    };
+
+    /// <summary>
+    /// ファンのコレクション (https://bandcamp.com/ユーザー名) / ウィッシュリスト (…/ユーザー名/wishlist) の URL なら
+    /// ユーザー名と種類を返す。それ以外 (アーティストのページなど) は null。
+    /// </summary>
+    public static (string Username, FanListKind Kind)? ParseFanList(string url)
+    {
+        if (!Uri.TryCreate(url.Contains("://", StringComparison.Ordinal) ? url.Trim() : "https://" + url.Trim(), UriKind.Absolute, out var uri)
+            || !(uri.Host.Equals("bandcamp.com", StringComparison.OrdinalIgnoreCase) || uri.Host.Equals("www.bandcamp.com", StringComparison.OrdinalIgnoreCase)))
+        {
+            return null;
+        }
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length is 0 or > 2 || NonFanPaths.Contains(segments[0]) || ParseFanUsername(segments[0]) is not { } user)
+        {
+            return null;
+        }
+
+        return segments.Length == 1 ? (user, FanListKind.Collection)
+            : segments[1].Equals("wishlist", StringComparison.OrdinalIgnoreCase) ? (user, FanListKind.Wishlist)
+            : null;
+    }
+
+    /// <summary>ファンのコレクション / ウィッシュリストのページの URL。</summary>
+    public static string FanListPage(string username, FanListKind kind) =>
+        kind == FanListKind.Wishlist ? $"https://bandcamp.com/{username}/wishlist" : $"https://bandcamp.com/{username}";
+
     public static string ArtUrl(long? artId, ArtSize size) =>
         artId is long id && id > 0
             ? $"https://f4.bcbits.com/img/a{id.ToString("D10", CultureInfo.InvariantCulture)}_{(int)size}.jpg"

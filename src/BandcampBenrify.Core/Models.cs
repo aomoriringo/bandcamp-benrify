@@ -197,5 +197,41 @@ public enum SearchKind
 }
 
 
+public enum FanListKind
+{
+    /// <summary>コレクション (購入した作品)</summary>
+    Collection,
+
+    /// <summary>ウィッシュリスト</summary>
+    Wishlist,
+}
+
+/// <summary>
+/// ほかのファンのコレクション / ウィッシュリスト (「探す」で開く)。ファンページには最初の 20 件だけが載り、
+/// 続きは API で 20 件ずつ読む (ResumeToken が続きの位置。null なら最後まで読んだ)。
+/// </summary>
+public sealed record FanList
+{
+    public string Username { get; init; } = "";
+
+    /// <summary>表示名 (無ければユーザー名)。</summary>
+    public string FanName { get; init; } = "";
+
+    public FanListKind Kind { get; init; }
+
+    public long FanId { get; init; }
+
+    /// <summary>全件数 (非公開の作品を除く Bandcamp の表示上の件数)。</summary>
+    public int ItemCount { get; init; }
+
+    public IReadOnlyList<DiscographyItem> Items { get; init; } = [];
+
+    public string? ResumeToken { get; init; }
+
+    public DateTimeOffset FetchedAt { get; init; }
+
+    public bool HasMore => ResumeToken is not null && Items.Count < ItemCount;
+}
+
 /// <summary>ファンページの解析結果。Items は最初の 20 件程度だけで、続きは API で取る。</summary>
 public sealed record FanPage(long FanId, int ItemCount, string? LastToken, IReadOnlyList<CollectionItem> Items);

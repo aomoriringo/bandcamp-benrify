@@ -686,6 +686,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return 0;
         }
 
+        if (BandcampUrls.ParseFanList(normalized) is not null)
+        {
+            // 何千件もあることがあるので、まとめてキューには入れない。「探す」で見て選んでもらう
+            StatusText = "ファンのコレクション / ウィッシュリストは「探す」で開いて、作品を選んでからキューに入れてください";
+            return 0;
+        }
+
         var kind = BandcampUrls.Classify(normalized);
         var ct = _jobsCts.Token;
         ActiveJobs++;
