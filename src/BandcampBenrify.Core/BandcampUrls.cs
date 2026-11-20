@@ -9,6 +9,8 @@ public enum ArtSize
     Small = 7,
     /// <summary>350px</summary>
     Medium = 2,
+    /// <summary>700px (ビジュアライザで大きく表示するとき)</summary>
+    Large = 16,
 }
 
 public static class BandcampUrls

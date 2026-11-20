@@ -15,6 +15,7 @@
         <KeyBinding Key="Left" Modifiers="Ctrl" Command="{Binding PreviousCommand}" />
         <KeyBinding Key="D" Modifiers="Ctrl" Command="{Binding CheckCurrentAndNextCommand}" />
         <KeyBinding Key="M" Modifiers="Ctrl" Command="{Binding ToggleMuteCommand}" />
+        <KeyBinding Key="V" Modifiers="Ctrl+Shift" Command="{Binding OpenVisualizerCommand}" />
     </Window.InputBindings>
 
     <Window.Resources>
@@ -218,7 +219,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Width="120" Height="120" Background="{StaticResource ArtPlaceholder}" CornerRadius="6">
+                    <Border Width="120" Height="120" Background="{StaticResource ArtPlaceholder}" CornerRadius="6"
+                            Cursor="Hand" ToolTip="ビジュアライザを開く (Ctrl+Shift+V)" MouseLeftButtonUp="NowArt_MouseLeftButtonUp">
                         <Border.Clip>
                             <RectangleGeometry Rect="0,0,120,120" RadiusX="6" RadiusY="6" />
                         </Border.Clip>
@@ -295,7 +297,9 @@
                             <TextBlock Text="チェックして次へ" FontSize="15" />
                         </StackPanel>
                     </Button>
-                    <Button x:Name="MuteButton" AutomationProperties.Name="消音" Style="{StaticResource IconButton}" Content="{Binding VolumeGlyph}" Margin="20,0,4,0"
+                    <Button x:Name="VisualizerButton" AutomationProperties.Name="ビジュアライザ" Style="{StaticResource IconButton}" Content="&#xE7F4;" Margin="16,0,0,0"
+                            Command="{Binding OpenVisualizerCommand}" ToolTip="ビジュアライザを開く (Ctrl+Shift+V)" />
+                    <Button x:Name="MuteButton" AutomationProperties.Name="消音" Style="{StaticResource IconButton}" Content="{Binding VolumeGlyph}" Margin="4,0,4,0"
                             Command="{Binding ToggleMuteCommand}" ToolTip="{Binding MuteToolTip}" />
                     <Slider x:Name="VolumeSlider" AutomationProperties.Name="音量" Width="110" Minimum="0" Maximum="1" Value="{Binding Volume}" VerticalAlignment="Center" ToolTip="音量"
                             Style="{StaticResource PlayerSlider}" IsMoveToPointEnabled="True" />

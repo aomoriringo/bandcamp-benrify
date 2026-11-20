@@ -81,6 +81,22 @@ public static class ArtPalette
         return FromHsl(h, Math.Max(s, 0.5), Math.Clamp(l, 0.6, 0.72));
     }
 
+    /// <summary>
+    /// アクセント色から色相を少しずつずらした色の並び (ビジュアライザの輪で、低音から高音へ色を変えるため)。
+    /// </summary>
+    public static Rgb[] Shades(Rgb c, int count, double hueSpread = 50)
+    {
+        var (h, s, l) = ToHsl(Accent(c));
+        var result = new Rgb[count];
+        for (var i = 0; i < count; i++)
+        {
+            var t = count == 1 ? 0 : (double)i / (count - 1) - 0.5;
+            result[i] = FromHsl((h + t * hueSpread + 360) % 360, s, Math.Clamp(l + t * 0.12, 0.5, 0.8));
+        }
+
+        return result;
+    }
+
     /// <summary>ジャケットの色をほんのり残した暗い背景色 (再生バーの背景用)。</summary>
     public static Rgb Background(Rgb c)
     {

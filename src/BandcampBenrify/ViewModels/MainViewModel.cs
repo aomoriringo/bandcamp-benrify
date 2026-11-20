@@ -53,6 +53,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private byte[]? _nowPeaks;
     private string _nowBpmText = "";
     private string? _nowBpmToolTip;
+    private double? _nowBpm;
+    private SpectrumTimeline? _nowSpectrum;
 
     /// <summary>
     /// 再生中の曲が表示から外れた (チェックして隠した) ときに、次の曲を決めるための「さっきまでの位置」。
@@ -193,6 +195,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         UncheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), false), p => Selected(p).Any(q => q.IsChecked));
         CheckCurrentAndNextCommand = new AsyncCommand(CheckCurrentAndNextAsync, () => Current is not null);
         ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
+        OpenVisualizerCommand = new RelayCommand(() => VisualizerRequested?.Invoke());
 
         LoadQueue();
         LoadCachedCollection();
@@ -435,6 +438,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(NowTitle));
                 OnPropertyChanged(nameof(NowSubtitle));
                 OnPropertyChanged(nameof(NowArtUrl));
+                OnPropertyChanged(nameof(NowLargeArtUrl));
                 OnPropertyChanged(nameof(NowStats));
                 OnPropertyChanged(nameof(WindowTitle));
             }
@@ -677,6 +681,31 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     }
 
     public bool HasNowBpmText => NowBpmText.Length > 0;
+
+    /// <summary>推定 BPM (未解析・推定できなかったときは null)。</summary>
+    public double? NowBpm
+    {
+        get => _nowBpm;
+        private set => Set(ref _nowBpm, value);
+    }
+
+    /// <summary>再生中の曲の音域ごとの音量の推移 (ビジュアライザ用。解析しながら増えていく)。</summary>
+    public SpectrumTimeline? NowSpectrum
+    {
+        get => _nowSpectrum;
+        private set => Set(ref _nowSpectrum, value);
+    }
+
+    /// <summary>今の再生位置 (秒)。ビジュアライザが毎フレーム読む (Position は 0.5 秒ごとにしか更新しない)。</summary>
+    public double PlaybackSeconds => Current is null ? 0 : _player.Position.TotalSeconds;
+
+    /// <summary>ビジュアライザで大きく表示するジャケット (700px)。</summary>
+    public string? NowLargeArtUrl => Current?.Track.ArtId is long id ? BandcampUrls.ArtUrl(id, ArtSize.Large) : null;
+
+    /// <summary>ビジュアライザを開く (ウィンドウは画面側で作る)。</summary>
+    public event Action? VisualizerRequested;
+
+    public ICommand OpenVisualizerCommand { get; }
 
     public string? NowBpmToolTip
     {
@@ -1418,15 +1447,20 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _analysisCts?.Cancel();
         var cts = _analysisCts = new CancellationTokenSource();
         var trackId = item.Track.TrackId;
-        if (_analysis.TryGet(trackId) is { } cached)
+
+        // 解析済みの曲でも、ビジュアライザ用の音域ごとの音量はメモリにしか無いので解析し直す (ダウンロードは再生と共用)
+        var cached = _analysis.TryGet(trackId);
+        if (cached is not null)
         {
             ShowAnalysis(cached);
-            return;
+        }
+        else
+        {
+            NowPeaks = null;
+            NowBpmText = "BPM 解析中…";
+            NowBpmToolTip = null;
         }
 
-        NowPeaks = null;
-        NowBpmText = "BPM 解析中…";
-        NowBpmToolTip = null;
         var reader = download.OpenReader();
         _ = Task.Run(() =>
         {
@@ -1434,14 +1468,26 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             {
                 var result = AudioAnalyzer.AnalyzeMp3(
                     reader,
-                    peaks => _ui.BeginInvoke(() =>
+                    cached is not null ? null : peaks => _ui.BeginInvoke(() =>
                     {
                         if (!cts.IsCancellationRequested)
                         {
                             NowPeaks = peaks;
                         }
                     }),
-                    cts.Token);
+                    cts.Token,
+                    spectrum => _ui.BeginInvoke(() =>
+                    {
+                        if (!cts.IsCancellationRequested)
+                        {
+                            NowSpectrum = spectrum;
+                        }
+                    }));
+                if (cached is not null)
+                {
+                    return;
+                }
+
                 _ui.BeginInvoke(() =>
                 {
                     _analysis.Save(trackId, result);
@@ -1461,7 +1507,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 // 曲を変えた (ダウンロードを捨てた) / 読めない mp3 など。再生には影響させない
                 _ui.BeginInvoke(() =>
                 {
-                    if (!cts.IsCancellationRequested)
+                    if (!cts.IsCancellationRequested && cached is null)
                     {
                         NowBpmText = "";
                         NowBpmToolTip = null;
@@ -1479,6 +1525,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private void ShowAnalysis(TrackAnalysis analysis)
     {
         NowPeaks = analysis.Peaks;
+        NowBpm = analysis.Bpm;
         if (analysis.Bpm is { } bpm)
         {
             NowBpmText = $"{Math.Round(bpm):0} BPM";
@@ -1499,6 +1546,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _download?.Dispose();
         _download = null;
         NowPeaks = null;
+        NowBpm = null;
+        NowSpectrum = null;
         NowBpmText = "";
         NowBpmToolTip = null;
     }

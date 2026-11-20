@@ -64,6 +64,9 @@ public sealed class WaveformView : FrameworkElement
             return;
         }
 
+        // 透明で全体を塗っておく (棒の無い静かな部分もクリックできるように)
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, width, height));
+
         var duration = Duration > 0 ? Duration : 0;
         var played = duration > 0 ? Math.Clamp(Position / duration, 0, 1) : 0;
         var peaks = Peaks;

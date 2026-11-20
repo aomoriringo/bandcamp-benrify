@@ -86,6 +86,42 @@ public sealed class AnalysisTests
     }
 
     [Fact]
+    public void SpectrumFollowsWhereTheSoundIs()
+    {
+        // 前半 2 秒は 80Hz (低音)、後半 2 秒は 5kHz (高音)
+        var samples = new float[Rate * 4];
+        for (var i = 0; i < samples.Length; i++)
+        {
+            var hz = i < Rate * 2 ? 80 : 5000;
+            samples[i] = (float)(0.5 * Math.Sin(2 * Math.PI * hz * i / Rate));
+        }
+
+        var analyzer = new AudioAnalyzer(Rate);
+        var spectrum = analyzer.Spectrum;
+        var bands = new float[spectrum.Bands];
+        Assert.False(spectrum.TryRead(1.0, bands)); // まだ解析していない
+
+        analyzer.Add(samples);
+        Assert.True(spectrum.AnalyzedSeconds > 3.5);
+
+        Assert.True(spectrum.TryRead(1.0, bands));
+        var low = Array.IndexOf(bands, bands.Max());
+        Assert.True(spectrum.TryRead(3.0, bands));
+        var high = Array.IndexOf(bands, bands.Max());
+        Assert.True(low < spectrum.Bands / 3, $"低音の一番大きい音域 {low}");
+        Assert.True(high > spectrum.Bands * 2 / 3, $"高音の一番大きい音域 {high}");
+        Assert.All(bands, v => Assert.InRange(v, 0, 1));
+    }
+
+    [Fact]
+    public void ShadesSpreadAroundTheAccentColor()
+    {
+        var shades = ArtPalette.Shades(new Rgb(200, 60, 40), 5);
+        Assert.Equal(5, shades.Length);
+        Assert.Equal(5, shades.Distinct().Count());
+    }
+
+    [Fact]
     public void StoreKeepsBpmIndexAndPeaks()
     {
         var dir = Path.Combine(Path.GetTempPath(), "bcb-analysis-" + Guid.NewGuid().ToString("N"));

@@ -27,6 +27,7 @@ public partial class MainWindow : Window
             if (e.NewValue is MainViewModel vm)
             {
                 ApplySavedBounds(vm.Settings.Window);
+                vm.VisualizerRequested += OpenVisualizer;
                 vm.PropertyChanged += (_, args) =>
                 {
                     // 再生中の曲が見えるようにスクロールする
@@ -39,6 +40,9 @@ public partial class MainWindow : Window
         };
         Closing += (_, _) =>
         {
+            // ビジュアライザも閉じる (位置の保存を先に済ませる)
+            _visualizer?.Close();
+
             if (Vm is { } vm)
             {
                 var r = WindowState == WindowState.Normal ? new Rect(Left, Top, Width, Height) : RestoreBounds;
@@ -81,21 +85,35 @@ public partial class MainWindow : Window
         UpdatePlayerColors();
     }
 
-    private static Rgb? PickArtColor(BitmapSource bitmap)
+    private static Rgb? PickArtColor(BitmapSource bitmap) => ArtColors.Pick(bitmap);
+
+    private VisualizerWindow? _visualizer;
+
+    /// <summary>ビジュアライザを開く (開いていれば前に出す)。</summary>
+    private void OpenVisualizer()
     {
-        try
+        if (Vm is not { } vm)
         {
-            var bgra = new FormatConvertedBitmap(bitmap, PixelFormats.Bgra32, null, 0);
-            var stride = bgra.PixelWidth * 4;
-            var pixels = new byte[stride * bgra.PixelHeight];
-            bgra.CopyPixels(pixels, stride, 0);
-            return ArtPalette.Dominant(pixels);
+            return;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException or System.IO.IOException or System.Runtime.InteropServices.COMException)
+
+        if (_visualizer is { } open)
         {
-            return null;
+            if (open.WindowState == WindowState.Minimized)
+            {
+                open.WindowState = WindowState.Normal;
+            }
+
+            open.Activate();
+            return;
         }
+
+        _visualizer = new VisualizerWindow(vm);
+        _visualizer.Closed += (_, _) => _visualizer = null;
+        _visualizer.Show();
     }
+
+    private void NowArt_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) => OpenVisualizer();
 
     /// <summary>再生バーの背景とアクセントを、ジャケットの色 (設定でオフならテーマカラー) にする。</summary>
     private void UpdatePlayerColors()

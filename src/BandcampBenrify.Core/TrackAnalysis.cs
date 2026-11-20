@@ -77,9 +77,15 @@ public sealed class AudioAnalyzer
         {
             _window[i] = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / FrameSize);
         }
+
+        // 各フレームは FrameSize 分のサンプルを見ているので、その真ん中の時刻のものとする
+        Spectrum = new SpectrumTimeline(_prevLog.Length, FramesPerSecond, FrameSize / 2.0 / sampleRate);
     }
 
     public int SampleRate { get; }
+
+    /// <summary>音域ごとの音量の推移 (ビジュアライザ用。解析しながら増えていく)。</summary>
+    public SpectrumTimeline Spectrum { get; }
 
     /// <summary>立ち上がりの強さを 1 秒あたり何回求めるか。</summary>
     public double FramesPerSecond => (double)SampleRate / Hop;
@@ -161,6 +167,7 @@ public sealed class AudioAnalyzer
 
         _hasPrev = true;
         _flux.Add((float)flux);
+        Spectrum.Append(_prevLog);
     }
 
     /// <summary>その場で計算する基数 2 の FFT。</summary>
@@ -327,11 +334,13 @@ public sealed class AudioAnalyzer
     /// mp3 を読みながら解析する。読み込みが遅い (ダウンロード中) ときは届くのを待つ。
     /// onPeaks にはときどき、ここまでの波形を渡す。
     /// </summary>
-    public static TrackAnalysis AnalyzeMp3(Stream mp3, Action<byte[]>? onPeaks = null, CancellationToken ct = default)
+    /// <param name="onSpectrum">解析を始めた時点で、音域ごとの音量の推移 (解析しながら増えていく) を渡す。</param>
+    public static TrackAnalysis AnalyzeMp3(Stream mp3, Action<byte[]>? onPeaks = null, CancellationToken ct = default, Action<SpectrumTimeline>? onSpectrum = null)
     {
         using var mpeg = new MpegFile(mp3);
         var channels = Math.Max(1, mpeg.Channels);
         var analyzer = new AudioAnalyzer(mpeg.SampleRate);
+        onSpectrum?.Invoke(analyzer.Spectrum);
         var buffer = new float[4096 * channels];
         var mono = new float[4096];
         var sinceReport = Stopwatch.StartNew();
@@ -360,6 +369,81 @@ public sealed class AudioAnalyzer
         }
 
         return analyzer.Finish();
+    }
+}
+
+/// <summary>
+/// 音域ごとの音量 (対数) の時間変化。解析スレッドが書き足し、画面側が再生位置の値を読む。メモリに置くだけで保存はしない。
+/// </summary>
+public sealed class SpectrumTimeline(int bands, double framesPerSecond, double firstFrameSeconds)
+{
+    private readonly Lock _lock = new();
+    private readonly float[] _max = new float[bands];
+    private float[] _data = new float[bands * 4096];
+    private int _frames;
+
+    /// <summary>音域の数 (低い方から)。</summary>
+    public int Bands { get; } = bands;
+
+    public double FramesPerSecond { get; } = framesPerSecond;
+
+    /// <summary>解析が済んでいる長さ (秒)。</summary>
+    public double AnalyzedSeconds
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return firstFrameSeconds + _frames / FramesPerSecond;
+            }
+        }
+    }
+
+    internal void Append(ReadOnlySpan<double> values)
+    {
+        lock (_lock)
+        {
+            if ((_frames + 1) * Bands > _data.Length)
+            {
+                Array.Resize(ref _data, _data.Length * 2);
+            }
+
+            for (var b = 0; b < Bands; b++)
+            {
+                var v = (float)values[b];
+                _data[_frames * Bands + b] = v;
+                _max[b] = Math.Max(_max[b], v);
+            }
+
+            _frames++;
+        }
+    }
+
+    /// <summary>
+    /// その時刻の音域ごとの音量を 0〜1 で書き込む (音域ごとに、ここまでで一番大きかった音量を 1 とする)。
+    /// まだ解析していない時刻なら false。
+    /// </summary>
+    public bool TryRead(double seconds, Span<float> destination)
+    {
+        lock (_lock)
+        {
+            var pos = (seconds - firstFrameSeconds) * FramesPerSecond;
+            if (_frames < 2 || pos >= _frames - 1)
+            {
+                return false;
+            }
+
+            pos = Math.Max(0, pos);
+            var i = (int)pos;
+            var t = (float)(pos - i);
+            for (var b = 0; b < Bands && b < destination.Length; b++)
+            {
+                var v = _data[i * Bands + b] * (1 - t) + _data[(i + 1) * Bands + b] * t;
+                destination[b] = _max[b] > 0 ? v / _max[b] : 0;
+            }
+
+            return true;
+        }
     }
 }
 

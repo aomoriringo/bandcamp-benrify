@@ -77,6 +77,9 @@ public sealed class AppSettings
 
     public WindowBounds? Window { get; set; }
 
+    /// <summary>ビジュアライザのウィンドウの位置と大きさ (Maximized は全画面で開くかどうか)。</summary>
+    public WindowBounds? VisualizerWindow { get; set; }
+
     public static AppSettings Load()
     {
         try
