@@ -26,9 +26,9 @@
         </Image>
         <Rectangle Fill="#B80B0B0D" />
 
-        <!-- 1280x720 で組んで、ウィンドウの大きさに合わせて拡大縮小する -->
+        <!-- 1280x780 で組んで、ウィンドウの大きさに合わせて拡大縮小する (輪が一番伸びても上が切れない高さ) -->
         <Viewbox Stretch="Uniform">
-            <Grid x:Name="Stage" Width="1280" Height="720">
+            <Grid x:Name="Stage" Width="1280" Height="780">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" />
@@ -36,9 +36,9 @@
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <!-- ジャケット (大きさは固定) と、周りの音の輪 -->
-                <Grid Width="520" Height="520" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,24,0,0">
-                    <infra:SpectrumRing x:Name="Ring" InnerRadius="170" MaxLength="72" BarThickness="7" />
+                <!-- ジャケット (大きさは固定) と、周りの音の輪。輪は一番伸びてもこの 500x500 に収まる -->
+                <Grid Width="500" Height="500" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,12,0,0">
+                    <infra:SpectrumRing x:Name="Ring" InnerRadius="166" MaxLength="66" BarThickness="7" />
                     <Border Width="310" Height="310" CornerRadius="8" Background="#22FFFFFF">
                         <Border.Clip>
                             <RectangleGeometry Rect="0,0,310,310" RadiusX="8" RadiusY="8" />

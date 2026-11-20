@@ -72,6 +72,10 @@ public sealed class SpectrumRing : FrameworkElement
 
         var center = new Point(ActualWidth / 2, ActualHeight / 2);
         var total = Half * 2;
+
+        // 一番伸びても自分の枠からはみ出さない長さにする (はみ出すと周りに切られる)
+        var room = Math.Min(ActualWidth, ActualHeight) / 2 - InnerRadius - 4 - BarThickness / 2;
+        var maxLength = Math.Max(0, Math.Min(MaxLength, room));
         for (var i = 0; i < total; i++)
         {
             // 右半分: 上 (0 度) から下へ低音 → 高音。左半分はその鏡映し
@@ -79,7 +83,7 @@ public sealed class SpectrumRing : FrameworkElement
             var angle = (i + 0.5) / total * 2 * Math.PI - Math.PI / 2;
             var cos = Math.Cos(angle);
             var sin = Math.Sin(angle);
-            var len = 4 + MaxLength * _levels[slot];
+            var len = 4 + maxLength * _levels[slot];
             var pen = _pens[slot * _pens.Length / Half];
             dc.DrawLine(pen,
                 new Point(center.X + cos * InnerRadius, center.Y + sin * InnerRadius),
