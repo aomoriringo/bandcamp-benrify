@@ -26,20 +26,18 @@
         </Image>
         <Rectangle Fill="#B80B0B0D" />
 
-        <!-- 1280x780 で組んで、ウィンドウの大きさに合わせて拡大縮小する (輪が一番伸びても上が切れない高さ) -->
+        <!-- 高さ 780 で組んで、ウィンドウの大きさに合わせて拡大縮小する (幅はウィンドウの縦横比に合わせてコードで決める) -->
         <Viewbox Stretch="Uniform">
             <Grid x:Name="Stage" Width="1280" Height="780">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <!-- ジャケット (大きさは固定) と、周りの音の輪。輪は一番伸びてもこの 500x500 に収まる -->
-                <Grid Width="500" Height="500" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,12,0,0">
+                <!-- ジャケットと周りの音の輪。画面のちょうど中央に置き、下の曲情報・波形にジャケットがかからない一番大きな大きさまで
+                     拡大縮小する (ArtScale はコードで決める)。輪は一番伸びてもこの 500x500 に収まる。輪が曲名に重なるのはかまわない。
+                     ちょうど中央だと下がって見えるので、下の余白で中心を 24 だけ上げる (大きさは中央に置いたときのまま) -->
+                <Grid x:Name="ArtStage" Width="500" Height="500" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,0,0,48" RenderTransformOrigin="0.5,0.5">
+                    <Grid.RenderTransform>
+                        <ScaleTransform x:Name="ArtScale" />
+                    </Grid.RenderTransform>
                     <infra:SpectrumRing x:Name="Ring" InnerRadius="166" MaxLength="66" BarThickness="7" />
-                    <Border Width="310" Height="310" CornerRadius="8" Background="#22FFFFFF">
+                    <Border x:Name="ArtFrame" Width="310" Height="310" CornerRadius="8" Background="#22FFFFFF">
                         <Border.Clip>
                             <RectangleGeometry Rect="0,0,310,310" RadiusX="8" RadiusY="8" />
                         </Border.Clip>
@@ -47,38 +45,40 @@
                     </Border>
                 </Grid>
 
-                <!-- 曲の情報 (左) と数字 (右) -->
-                <Grid Grid.Row="1" Margin="56,0,56,14">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <StackPanel VerticalAlignment="Bottom">
-                        <TextBlock x:Name="TitleText" FontSize="40" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="SubText" FontSize="22" Opacity="0.82" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="LabelText" FontSize="17" Opacity="0.55" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="32,0,0,4">
-                        <StackPanel x:Name="BpmStat" Margin="0,0,44,0" Visibility="Collapsed">
-                            <TextBlock x:Name="BpmText" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                            <TextBlock Text="BPM" FontSize="15" Opacity="0.55" HorizontalAlignment="Right" />
+                <StackPanel x:Name="BottomPanel" VerticalAlignment="Bottom">
+                    <!-- 曲の情報 (左) と数字 (右) -->
+                    <Grid Margin="56,0,56,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel VerticalAlignment="Bottom">
+                            <TextBlock x:Name="TitleText" FontSize="40" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="SubText" FontSize="22" Opacity="0.82" Margin="0,4,0,0" TextTrimming="CharacterEllipsis" />
+                            <TextBlock x:Name="LabelText" FontSize="17" Opacity="0.55" Margin="0,6,0,0" TextTrimming="CharacterEllipsis" />
                         </StackPanel>
-                        <StackPanel x:Name="SupportersStat" Visibility="Collapsed">
-                            <TextBlock x:Name="SupportersText" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Right" />
-                            <TextBlock Text="Supporters" FontSize="15" Opacity="0.55" HorizontalAlignment="Right" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Bottom" Margin="32,0,0,4">
+                            <StackPanel x:Name="BpmStat" Margin="0,0,44,0" Visibility="Collapsed">
+                                <TextBlock x:Name="BpmText" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                <TextBlock Text="BPM" FontSize="15" Opacity="0.55" HorizontalAlignment="Right" />
+                            </StackPanel>
+                            <StackPanel x:Name="SupportersStat" Visibility="Collapsed">
+                                <TextBlock x:Name="SupportersText" FontSize="40" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                <TextBlock Text="Supporters" FontSize="15" Opacity="0.55" HorizontalAlignment="Right" />
+                            </StackPanel>
                         </StackPanel>
-                    </StackPanel>
-                </Grid>
+                    </Grid>
 
-                <!-- 波形 (再生済みの部分はジャケットの色)。クリック・ドラッグでシーク -->
-                <infra:WaveformView x:Name="Wave" Grid.Row="2" Height="64" Margin="56,4,56,0" RestBrush="#4DFFFFFF" PlayedBrush="White"
-                                    Cursor="Hand" ToolTip="クリック / ドラッグで再生位置を移動"
-                                    MouseLeftButtonDown="Wave_MouseLeftButtonDown" MouseMove="Wave_MouseMove" MouseLeftButtonUp="Wave_MouseLeftButtonUp"
-                                    LostMouseCapture="Wave_LostMouseCapture" />
-                <Grid Grid.Row="3" Margin="56,6,56,26">
-                    <TextBlock x:Name="PositionText" FontSize="15" Opacity="0.6" HorizontalAlignment="Left" />
-                    <TextBlock x:Name="DurationText" FontSize="15" Opacity="0.6" HorizontalAlignment="Right" />
-                </Grid>
+                    <!-- 波形 (再生済みの部分はジャケットの色)。クリック・ドラッグでシーク -->
+                    <infra:WaveformView x:Name="Wave" Height="56" Margin="56,4,56,0" RestBrush="#4DFFFFFF" PlayedBrush="White"
+                                        Cursor="Hand" ToolTip="クリック / ドラッグで再生位置を移動"
+                                        MouseLeftButtonDown="Wave_MouseLeftButtonDown" MouseMove="Wave_MouseMove" MouseLeftButtonUp="Wave_MouseLeftButtonUp"
+                                        LostMouseCapture="Wave_LostMouseCapture" />
+                    <Grid Margin="56,4,56,20">
+                        <TextBlock x:Name="PositionText" FontSize="15" Opacity="0.6" HorizontalAlignment="Left" />
+                        <TextBlock x:Name="DurationText" FontSize="15" Opacity="0.6" HorizontalAlignment="Right" />
+                    </Grid>
+                </StackPanel>
             </Grid>
         </Viewbox>
 

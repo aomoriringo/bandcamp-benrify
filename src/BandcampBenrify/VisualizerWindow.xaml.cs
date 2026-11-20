@@ -18,6 +18,12 @@ public partial class VisualizerWindow : Window
 {
     private const int RingColorCount = 6;
 
+    /// <summary>舞台の幅の下限 (これより細いウィンドウでは幅で縮める)。</summary>
+    private const double StageMinWidth = 1000;
+
+    /// <summary>ジャケットの下端と曲名の上端の間 (舞台の座標)。</summary>
+    private const double ArtGap = 4;
+
     private readonly MainViewModel _vm;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private float[] _bands = new float[32];
@@ -48,7 +54,9 @@ public partial class VisualizerWindow : Window
         {
             var scale = Math.Clamp(ActualHeight / 760, 1, 2.5);
             Controls.LayoutTransform = new ScaleTransform(scale, scale);
+            FitStage();
         };
+        BottomPanel.SizeChanged += (_, _) => FitArt();
         Closed += (_, _) =>
         {
             CompositionTarget.Rendering -= OnRendering;
@@ -60,6 +68,35 @@ public partial class VisualizerWindow : Window
         ApplyColors(null);
         ShowTrack();
         ShowAnalysis();
+    }
+
+    /// <summary>
+    /// 舞台の幅をウィンドウの縦横比に合わせる (高さで拡大縮小して、横に余白を作らない)。
+    /// ただし細長いウィンドウでは曲名が入るよう最低限の幅は取り、そのときは幅で縮める。
+    /// </summary>
+    private void FitStage()
+    {
+        if (Root.ActualWidth <= 0 || Root.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        Stage.Width = Math.Max(StageMinWidth, Stage.Height * Root.ActualWidth / Root.ActualHeight);
+    }
+
+    /// <summary>
+    /// ジャケットは舞台のちょうど中央に置き、下の曲情報・波形にかからない一番大きな大きさにする。
+    /// 周りの輪も同じ割合で拡大縮小する (輪が曲名に重なるのはかまわない)。
+    /// </summary>
+    private void FitArt()
+    {
+        var art = Stage.Height - 2 * (BottomPanel.ActualHeight + ArtGap);
+
+        // 輪が舞台からはみ出さない大きさまで
+        var scale = Math.Min(art / ArtFrame.Width, Math.Min(Stage.Height, Stage.Width) / ArtStage.Width);
+        scale = Math.Max(0.3, scale);
+        ArtScale.ScaleX = scale;
+        ArtScale.ScaleY = scale;
     }
 
     private void OnVmChanged(object? sender, PropertyChangedEventArgs e)
@@ -93,7 +130,8 @@ public partial class VisualizerWindow : Window
         TitleText.Text = item.Title;
         SubText.Text = $"{item.Artist} — {item.Album}";
         LabelText.Text = item.Details.Label ?? "";
-        LabelText.Visibility = string.IsNullOrEmpty(LabelText.Text) ? Visibility.Collapsed : Visibility.Visible;
+        // レーベルが無いときも場所は空けておく (曲ごとにジャケットの大きさが変わらないように)
+        LabelText.Visibility = string.IsNullOrEmpty(LabelText.Text) ? Visibility.Hidden : Visibility.Visible;
 
         // 未取得 (…) ならサポーター数は出さない
         SupportersText.Text = item.TotalText;
