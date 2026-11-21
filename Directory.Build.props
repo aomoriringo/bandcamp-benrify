@@ -2,6 +2,6 @@
   <!-- アプリのバージョン (セマンティックバージョニング: MAJOR.MINOR.PATCH)。
        exe・Core の両方に入り、User-Agent と設定画面の表示もここから取る。上げるのはここだけでよい。 -->
   <PropertyGroup>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
   </PropertyGroup>
 </Project>
