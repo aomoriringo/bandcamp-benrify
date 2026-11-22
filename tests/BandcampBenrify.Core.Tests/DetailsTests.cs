@@ -123,7 +123,7 @@ public class DetailsTests
     [InlineData(1.5, "GBP", false, "£1.50")]
     [InlineData(1000, "JPY", true, "¥1000")]
     [InlineData(7, "SEK", true, "7 SEK")]
-    [InlineData(0, "USD", true, "自由価格")]
+    [InlineData(0, "USD", true, "NYP")]
     [InlineData(0, "USD", false, "無料")]
     public void FormatsPrices(double amount, string currency, bool orMore, string expected)
     {

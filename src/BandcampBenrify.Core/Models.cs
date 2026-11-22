@@ -70,7 +70,7 @@ public sealed record PriceInfo
         {
             if (Amount == 0)
             {
-                return OrMore ? "自由価格" : "無料";
+                return OrMore ? "NYP" : "無料"; // NYP: Name Your Price (0 円から自分で値段を決める)
             }
 
             var number = Amount.ToString(Amount == decimal.Truncate(Amount) ? "0" : "0.00", System.Globalization.CultureInfo.InvariantCulture);
