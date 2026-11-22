@@ -132,6 +132,57 @@ public class ThrottleTests
         Assert.Equal(TimeSpan.FromSeconds(4), client.MinInterval); // 間隔を広げる
     }
 
+    private static HttpResponseMessage Redirect(HttpStatusCode code, string to)
+    {
+        var r = new HttpResponseMessage(code);
+        r.Headers.Location = new Uri(to);
+        return r;
+    }
+
+    [Fact]
+    public async Task RedirectsAreFollowedOneRequestAtATime()
+    {
+        var handler = new FakeHandler(req => req.RequestUri!.Host == "label.bandcamp.test"
+            ? Redirect(HttpStatusCode.MovedPermanently, "https://label.test/track/x")
+            : Ok("page"));
+        using var client = new ThrottledHttpClient(TimeSpan.FromSeconds(1), handler);
+
+        var result = await client.GetAsync("https://label.bandcamp.test/track/x", RequestPriority.Interactive);
+
+        Assert.Equal("page", result.Body);
+        Assert.Equal("https://label.test/track/x", result.FinalUri.ToString());
+        var times = handler.Requests.Select(r => r.At).ToList();
+        Assert.Equal(2, times.Count);
+        Assert.True(times[1] - times[0] >= TimeSpan.FromMilliseconds(950), $"gap: {(times[1] - times[0]).TotalMilliseconds}ms"); // 転送先も間隔を空ける
+        Assert.Equal(2, client.TotalRequests);
+    }
+
+    [Fact]
+    public async Task RedirectLoopStopsAfterOneRound()
+    {
+        // アプリからのアクセスだけ独自ドメインへ転送され、そのドメインが Bandcamp へ送り返す
+        var handler = new FakeHandler(req => req.RequestUri!.Host == "label.bandcamp.test"
+            ? Redirect(HttpStatusCode.MovedPermanently, "https://label.test/track/x")
+            : Redirect(HttpStatusCode.SeeOther, "https://label.bandcamp.test/track/x"));
+        using var client = new ThrottledHttpClient(TimeSpan.FromSeconds(1), handler, (_, _) => Task.CompletedTask);
+
+        var ex = await Assert.ThrowsAsync<BandcampRedirectLoopException>(() => client.GetAsync("https://label.bandcamp.test/track/x", RequestPriority.Interactive));
+
+        Assert.Contains("label.test", ex.Message);
+        Assert.Equal(2, handler.Requests.Count); // 一周したらやめる
+    }
+
+    [Fact]
+    public async Task LongRedirectChainsAreCut()
+    {
+        var handler = new FakeHandler(req => Redirect(HttpStatusCode.Found, $"https://x.test/{int.Parse(req.RequestUri!.AbsolutePath.Trim('/')) + 1}"));
+        using var client = new ThrottledHttpClient(TimeSpan.FromSeconds(1), handler, (_, _) => Task.CompletedTask);
+
+        await Assert.ThrowsAsync<HttpRequestException>(() => client.GetAsync("https://x.test/0", RequestPriority.Interactive));
+
+        Assert.Equal(5, handler.Requests.Count);
+    }
+
     [Fact]
     public async Task CancelledRequestsAreNeverSent()
     {

@@ -44,6 +44,8 @@ public sealed class ThrottledHttpClient : IDisposable
         handler ??= new SocketsHttpHandler
         {
             AutomaticDecompression = DecompressionMethods.All,
+            // 転送は自分で追う (自動だと間隔を空けずに何十回も送ってしまう。転送がループするページもある)
+            AllowAutoRedirect = false,
             MaxConnectionsPerServer = 1,
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         };
@@ -131,11 +133,7 @@ public sealed class ThrottledHttpClient : IDisposable
                     continue; // キャンセル済み
                 }
 
-                var wait = _lastRequestAt + MinInterval + TimeSpan.FromMilliseconds(_rng.Next(0, 500)) - DateTimeOffset.UtcNow;
-                if (wait > TimeSpan.Zero)
-                {
-                    await _delay(wait, stop).ConfigureAwait(false);
-                }
+                await WaitForTurnAsync(stop).ConfigureAwait(false);
 
                 if (item.Completion.Task.IsCompleted)
                 {
@@ -178,17 +176,71 @@ public sealed class ThrottledHttpClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// 1 件の取得。転送 (3xx) は自動では追わず、転送先も 1 件のリクエストとして間隔を空けて追う。
+    /// 同じ URL に戻ってきたら (転送のループ) そこで諦める。
+    /// </summary>
     private async Task<HttpResult> SendWithBackoffAsync(WorkItem item, CancellationToken stop)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, item.Token);
+        var factory = item.Factory;
+        var visited = new List<Uri>();
+        for (var hop = 0; ; hop++)
+        {
+            if (hop > 0)
+            {
+                await WaitForTurnAsync(stop).ConfigureAwait(false);
+                linked.Token.ThrowIfCancellationRequested();
+            }
+
+            var (result, next) = await SendOneAsync(factory, linked.Token, stop).ConfigureAwait(false);
+            if (result is not null)
+            {
+                return result;
+            }
+
+            visited.Add(next.From);
+            if (visited.Contains(next.To))
+            {
+                throw new BandcampRedirectLoopException(
+                    // Bandcamp がアプリからのアクセスだけをレーベルの独自ドメインへ転送し、そのドメインが Bandcamp へ送り返す、など
+                    $"転送がループしています ({string.Join(" ⇄ ", visited.Select(u => u.Host).Distinct())})。ブラウザで開いてください");
+            }
+
+            if (hop + 1 >= MaxRedirects)
+            {
+                throw new HttpRequestException($"転送が多すぎるため取得をやめました: {visited[0]}");
+            }
+
+            var to = next.To;
+            factory = () => new HttpRequestMessage(HttpMethod.Get, to);
+        }
+    }
+
+    /// <summary>1 件の取得で追う転送の回数の上限。</summary>
+    private const int MaxRedirects = 5;
+
+    /// <summary>前のリクエストの開始から最低間隔 (と少しのゆらぎ) が経つまで待つ。</summary>
+    private async Task WaitForTurnAsync(CancellationToken stop)
+    {
+        var wait = _lastRequestAt + MinInterval + TimeSpan.FromMilliseconds(_rng.Next(0, 500)) - DateTimeOffset.UtcNow;
+        if (wait > TimeSpan.Zero)
+        {
+            await _delay(wait, stop).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>1 回送る (429/503 なら待って送り直す)。転送なら結果の代わりに転送元と転送先を返す。</summary>
+    private async Task<(HttpResult? Result, (Uri From, Uri To) Redirect)> SendOneAsync(Func<HttpRequestMessage> factory, CancellationToken token, CancellationToken stop)
+    {
         for (var attempt = 0; ; attempt++)
         {
-            using var request = item.Factory();
+            using var request = factory();
             _lastRequestAt = DateTimeOffset.UtcNow;
             Interlocked.Increment(ref _totalRequests);
 
             // 間隔は「前のリクエストの開始」から測る。常に 1 本ずつなので同時接続にはならない。
-            using var response = await _http.SendAsync(request, linked.Token).ConfigureAwait(false);
+            using var response = await _http.SendAsync(request, token).ConfigureAwait(false);
 
             if (response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable)
             {
@@ -208,12 +260,21 @@ public sealed class ThrottledHttpClient : IDisposable
                 continue;
             }
 
+            if (request.Method == HttpMethod.Get
+                && response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Found or HttpStatusCode.SeeOther
+                    or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect
+                && response.Headers.Location is { } location)
+            {
+                var from = request.RequestUri!;
+                return (null, (from, location.IsAbsoluteUri ? location : new Uri(from, location)));
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 throw new HttpRequestException($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}: {request.RequestUri}", null, response.StatusCode);
             }
 
-            var body = await response.Content.ReadAsStringAsync(linked.Token).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
             if (IsBotChallenge(body))
             {
                 // アクセス確認 (ボット対策) のページ。回避はせず、間隔を広げてここで諦める
@@ -222,7 +283,7 @@ public sealed class ThrottledHttpClient : IDisposable
                 throw new BandcampBlockedException("Bandcamp がアクセス確認 (ボット対策) のページを返しました。このページはアプリからは取得できません。ブラウザで開いてください。");
             }
 
-            return new HttpResult(body, response.RequestMessage?.RequestUri ?? request.RequestUri!);
+            return (new HttpResult(body, response.RequestMessage?.RequestUri ?? request.RequestUri!), default);
         }
     }
 

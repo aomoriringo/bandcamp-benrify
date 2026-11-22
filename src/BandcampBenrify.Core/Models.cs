@@ -186,6 +186,9 @@ public sealed class BandcampParseException(string message) : Exception(message);
 /// <summary>Bandcamp がアクセス確認 (ボット対策) のページを返した。回避はしない。</summary>
 public sealed class BandcampBlockedException(string message) : HttpRequestException(message);
 
+/// <summary>転送が同じ URL に戻ってくる (ループする) ページ。ブラウザで開いてもらうしかない。</summary>
+public sealed class BandcampRedirectLoopException(string message) : HttpRequestException(message);
+
 public sealed record CollectionItem(ItemType Type, long Id);
 
 public enum SearchKind
