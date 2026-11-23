@@ -10,7 +10,7 @@ public sealed record TrackAnalysis
     public const int PeaksPerSecond = 10;
 
     /// <summary>解析のやり方の版。BPM の求め方を変えたら上げる (古い版で保存された結果は、次に再生したときに解析し直して置き換える)。</summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     /// <summary>この結果を出した解析の版 (版を持たない古い結果は 0)。</summary>
     public int Version { get; init; }
@@ -226,9 +226,9 @@ public sealed class AudioAnalyzer
     {
         public double MinBpm { get; init; } = MinBpmDefault;
         public double MaxBpm { get; init; } = MaxBpmDefault;
-        public double PriorCenter { get; init; } = 170;
+        public double PriorCenter { get; init; } = 135;
         public double PriorWidth { get; init; } = 0.8;
-        public double HalfBeatWeight { get; init; } = 0.15;
+        public double HalfBeatWeight { get; init; } = 0.25;
     }
 
     internal IReadOnlyList<float> Flux => _flux;
@@ -312,10 +312,10 @@ public sealed class AudioAnalyzer
             return sum / k;
         }
 
-        // 170 BPM を中心にした緩い好み (倍・半分の取り違えを減らす)
-        // (中心と幅・8 分音符の加点・上限 260 は、BPM が付いている手元の曲での答え合わせで決めた。
-        //  普通の曲 160 曲は正解 133 → 131、BPM 170 以上の曲 188 曲は 83 → 169。
-        //  前は 135 を中心・上限 200 にしていて、200 を超える曲が半分の BPM になっていた。100 前後の曲は倍に出やすくなった)
+        // 135 BPM を中心にした緩い好み (倍・半分の取り違えを減らす)
+        // (中心と幅は、BPM が付いている手元の曲 160 曲での答え合わせで決めた。
+        //  中心を 170 にすると 200 を超える曲は半分になりにくくなるが、100 前後の曲が倍に出やすくなるのでやめた。
+        //  200 を超える曲が半分に出たときは、手動で 2 倍に直してもらう。上限 260 は、普通の曲の結果を変えずに残している)
         double Prior(double bpm) => Math.Exp(-0.5 * Math.Pow(Math.Log2(bpm / o.PriorCenter) / o.PriorWidth, 2));
 
         var minLag = 60 * fps / o.MaxBpm;

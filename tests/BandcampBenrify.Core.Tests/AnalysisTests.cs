@@ -38,14 +38,12 @@ public sealed class AnalysisTests
         return analyzer.Finish();
     }
 
-    // 100 以下で裏拍にハイハットがあると、半拍ごと (倍の BPM) にも音が並ぶので倍に出ることがある。
-    // 速い曲 (200 超え) を半分にしないことを優先した (TrackAnalysis の Prior の説明を参照)
     [Theory]
     [InlineData(128)]
+    [InlineData(100)]
     [InlineData(140)]
     [InlineData(174)]
-    [InlineData(200)]
-    [InlineData(220)]
+    [InlineData(87.5)]
     public void EstimatesTheTempoOfASteadyBeat(double bpm)
     {
         var result = Analyze(Beat(bpm, 40));
