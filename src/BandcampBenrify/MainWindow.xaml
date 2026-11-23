@@ -283,7 +283,7 @@
                                 Minimum="0" Maximum="{Binding SeekMaximum}" Value="{Binding Position, Mode=OneWay}"
                                 IsMoveToPointEnabled="True"
                                 Thumb.DragStarted="SeekBar_DragStarted" Thumb.DragCompleted="SeekBar_DragCompleted"
-                                PreviewMouseLeftButtonUp="SeekBar_MouseUp" />
+                                PreviewMouseLeftButtonUp="SeekBar_MouseUp" LostMouseCapture="SeekBar_LostMouseCapture" />
                         <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" MinWidth="52" />
                     </Grid>
                 </StackPanel>

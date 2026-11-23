@@ -22,6 +22,10 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // 波形 (シークバー) を押したとき。つまみ以外を押すと Slider が自分で処理済みにするので、処理済みでも受け取る
+        SeekBar.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(SeekBar_MouseDown), handledEventsToo: true);
+
         DataContextChanged += (_, e) =>
         {
             if (e.NewValue is MainViewModel vm)
@@ -204,8 +208,34 @@ public partial class MainWindow : Window
         }
     }
 
+    // ---- シークバー (波形) ----
+    // 押してから離すまでは再生位置の定期更新を止める (IsSeeking)。止めないと、押している間に更新が入ったとき
+    // クリックした位置が今の再生位置に書き戻され、離したときに元の位置へシークしてしまう。
+
+    private bool _seekBarPressed;
+    private bool _seekThumbDragging;
+
+    private void SeekBar_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (Vm is not { HasCurrent: true } vm)
+        {
+            return;
+        }
+
+        _seekBarPressed = true;
+        vm.IsSeeking = true;
+
+        // つまみ以外を押したとき: 離したときにシークバーの外でも受け取れるようにマウスをつかまえておく
+        // (つまみはドラッグのために自分でつかまえる)
+        if (!IsOnThumb(e.OriginalSource as DependencyObject))
+        {
+            SeekBar.CaptureMouse();
+        }
+    }
+
     private void SeekBar_DragStarted(object sender, DragStartedEventArgs e)
     {
+        _seekThumbDragging = true;
         if (Vm is { } vm)
         {
             vm.IsSeeking = true;
@@ -214,20 +244,63 @@ public partial class MainWindow : Window
 
     private void SeekBar_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        if (Vm is { } vm)
-        {
-            vm.SeekTo(SeekBar.Value);
-            vm.IsSeeking = false;
-        }
+        _seekThumbDragging = false;
+        FinishSeek(seek: true);
     }
 
     private void SeekBar_MouseUp(object sender, MouseButtonEventArgs e)
     {
-        // つまみのドラッグ以外 (バーのクリック) でのシーク
-        if (Vm is { IsSeeking: false } vm)
+        // つまみのドラッグは DragCompleted で処理する
+        if (!_seekThumbDragging)
         {
-            vm.SeekTo(SeekBar.Value);
+            FinishSeek(seek: true);
         }
+    }
+
+    private void SeekBar_LostMouseCapture(object sender, MouseEventArgs e)
+    {
+        // 離す前にマウスを奪われた (別のウィンドウに切り替えたなど) ときは、シークせずに定期更新を戻す
+        if (!_seekThumbDragging && Mouse.LeftButton != MouseButtonState.Pressed)
+        {
+            FinishSeek(seek: false);
+        }
+    }
+
+    private void FinishSeek(bool seek)
+    {
+        if (!_seekBarPressed)
+        {
+            return; // 押していない (別の場所で押して、ここで離したなど)
+        }
+
+        _seekBarPressed = false;
+        if (SeekBar.IsMouseCaptured)
+        {
+            SeekBar.ReleaseMouseCapture();
+        }
+
+        if (Vm is { } vm)
+        {
+            if (seek)
+            {
+                vm.SeekTo(SeekBar.Value);
+            }
+
+            vm.IsSeeking = false;
+        }
+    }
+
+    private bool IsOnThumb(DependencyObject? element)
+    {
+        for (var e = element; e is not null && e != SeekBar; e = VisualTreeHelper.GetParent(e))
+        {
+            if (e is Thumb)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
