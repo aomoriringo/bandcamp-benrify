@@ -37,11 +37,21 @@
                         <ScaleTransform x:Name="ArtScale" />
                     </Grid.RenderTransform>
                     <infra:SpectrumRing x:Name="Ring" InnerRadius="166" MaxLength="66" BarThickness="7" />
-                    <Border x:Name="ArtFrame" Width="310" Height="310" CornerRadius="8" Background="#22FFFFFF">
+                    <!-- ジャケットは丸く切り抜き、再生中はゆっくり回す (ArtRotate はコードで回す) -->
+                    <Border x:Name="ArtFrame" Width="310" Height="310" CornerRadius="155" Background="#22FFFFFF" RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <RotateTransform x:Name="ArtRotate" />
+                        </Border.RenderTransform>
                         <Border.Clip>
-                            <RectangleGeometry Rect="0,0,310,310" RadiusX="8" RadiusY="8" />
+                            <EllipseGeometry Center="155,155" RadiusX="155" RadiusY="155" />
                         </Border.Clip>
-                        <Image x:Name="ArtImage" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" />
+                        <!-- 少し拡大してから切り抜く。レコード盤の絵のジャケットは盤が正方形より少し小さく、そのままだと縁の余白が細い輪になって残るため
+                             (いろいろなレーベルのジャケットで比べて、余白が消えて端の文字は欠けない 1.08 にした) -->
+                        <Image x:Name="ArtImage" Stretch="UniformToFill" RenderOptions.BitmapScalingMode="HighQuality" RenderTransformOrigin="0.5,0.5">
+                            <Image.RenderTransform>
+                                <ScaleTransform ScaleX="1.08" ScaleY="1.08" />
+                            </Image.RenderTransform>
+                        </Image>
                     </Border>
                 </Grid>
 

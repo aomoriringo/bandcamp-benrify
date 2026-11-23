@@ -122,6 +122,17 @@ public sealed class AnalysisTests
     }
 
     [Fact]
+    public void ShadesCanDriftAroundTheColorWheel()
+    {
+        var c = new Rgb(200, 60, 40);
+        var start = ArtPalette.Shades(c, 6);
+        Assert.Equal(start, ArtPalette.Shades(c, 6, hueShift: 0));
+        Assert.NotEqual(start, ArtPalette.Shades(c, 6, hueShift: 120));
+        Assert.Equal(start, ArtPalette.Shades(c, 6, hueShift: 360)); // 一周すると元の色
+        Assert.Equal(ArtPalette.Shades(c, 6, hueShift: 300), ArtPalette.Shades(c, 6, hueShift: -60));
+    }
+
+    [Fact]
     public void StoreKeepsBpmIndexAndPeaks()
     {
         var dir = Path.Combine(Path.GetTempPath(), "bcb-analysis-" + Guid.NewGuid().ToString("N"));

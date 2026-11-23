@@ -84,14 +84,16 @@ public static class ArtPalette
     /// <summary>
     /// アクセント色から色相を少しずつずらした色の並び (ビジュアライザの輪で、低音から高音へ色を変えるため)。
     /// </summary>
-    public static Rgb[] Shades(Rgb c, int count, double hueSpread = 50)
+    /// <param name="hueShift">全体の色相をずらす角度 (度)。時間とともに増やすと、色がゆっくり移り変わる。</param>
+    public static Rgb[] Shades(Rgb c, int count, double hueSpread = 50, double hueShift = 0)
     {
         var (h, s, l) = ToHsl(Accent(c));
         var result = new Rgb[count];
         for (var i = 0; i < count; i++)
         {
             var t = count == 1 ? 0 : (double)i / (count - 1) - 0.5;
-            result[i] = FromHsl((h + t * hueSpread + 360) % 360, s, Math.Clamp(l + t * 0.12, 0.5, 0.8));
+            var hue = ((h + hueShift + t * hueSpread) % 360 + 360) % 360;
+            result[i] = FromHsl(hue, s, Math.Clamp(l + t * 0.12, 0.5, 0.8));
         }
 
         return result;

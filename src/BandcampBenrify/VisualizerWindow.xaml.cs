@@ -24,6 +24,14 @@ public partial class VisualizerWindow : Window
     /// <summary>ジャケットの下端と曲名の上端の間 (舞台の座標)。</summary>
     private const double ArtGap = 4;
 
+    /// <summary>ジャケットを回すときの 1 回転の秒数 (ゆっくり)。</summary>
+    private const double SpinSeconds = 20;
+
+    /// <summary>輪の色が色相をひと回りする秒数 (ゆっくり)。</summary>
+    private const double HueCycleSeconds = 120;
+
+    private double _spinAngle;
+
     private readonly MainViewModel _vm;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private float[] _bands = new float[32];
@@ -194,21 +202,38 @@ public partial class VisualizerWindow : Window
 
     private Rgb? _artColor;
 
+    /// <summary>輪の色の元 (ジャケットの色、無ければテーマカラー)。</summary>
+    private Rgb _ringBase = new(255, 255, 255);
+
+    /// <summary>輪の色相のずれ (度)。再生中はゆっくり増えていき、曲が変わっても続きから回る。</summary>
+    private double _hueShift;
+
+    private double _appliedHueShift;
+
     /// <summary>輪と波形の色: ジャケットの色 (色味が無ければテーマカラー)。</summary>
     private void ApplyColors(Rgb? artColor)
     {
         _artColor = artColor;
         if (artColor is { } c)
         {
-            Ring.SetColors(ArtPalette.Shades(c, RingColorCount).Select(ArtColors.ToColor).ToList());
+            _ringBase = c;
             Wave.PlayedBrush = Theme.Frozen(ArtColors.ToColor(ArtPalette.Accent(c)));
         }
         else
         {
             var accent = (Application.Current.TryFindResource("AccentBrush") as SolidColorBrush)?.Color ?? Colors.White;
-            Ring.SetColors([accent]);
+            _ringBase = new Rgb(accent.R, accent.G, accent.B);
             Wave.PlayedBrush = Theme.Frozen(accent);
         }
+
+        ApplyRingColors();
+    }
+
+    /// <summary>輪の色: ジャケット (またはテーマ) の色から、今の色相のずれ分だけ回した色の並び。</summary>
+    private void ApplyRingColors()
+    {
+        _appliedHueShift = _hueShift;
+        Ring.SetColors(ArtPalette.Shades(_ringBase, RingColorCount, hueShift: _hueShift).Select(ArtColors.ToColor).ToList());
     }
 
     private void OnThemeChanged()
@@ -246,6 +271,24 @@ public partial class VisualizerWindow : Window
 
         // 止めている / まだ解析が追いついていないときは輪を縮める
         Ring.Update(read ? _bands.AsSpan(0, spectrum!.Bands) : ReadOnlySpan<float>.Empty, dt);
+
+        // 輪の色をゆっくり移り変わらせる (再生中だけ。1 度以上変わったときだけ塗り直す)
+        if (_vm.IsPlaying)
+        {
+            _hueShift = (_hueShift + dt * 360 / HueCycleSeconds) % 360;
+            var moved = Math.Abs(_hueShift - _appliedHueShift);
+            if (Math.Min(moved, 360 - moved) >= 1)
+            {
+                ApplyRingColors();
+            }
+        }
+
+        // 丸いジャケットを回す (再生中だけ。止めたらその角度で止まる)
+        if (_vm.IsPlaying)
+        {
+            _spinAngle = (_spinAngle + dt * 360 / SpinSeconds) % 360;
+            ArtRotate.Angle = _spinAngle;
+        }
 
         if (_vm.Current is not null)
         {
