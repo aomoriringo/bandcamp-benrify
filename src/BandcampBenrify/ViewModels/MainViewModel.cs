@@ -54,6 +54,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private string _nowBpmText = "";
     private string? _nowBpmToolTip;
     private double? _nowBpm;
+    private TrackAnalysis? _nowAnalysis;
     private SpectrumTimeline? _nowSpectrum;
 
     /// <summary>
@@ -195,6 +196,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         UncheckSelectedCommand = new RelayCommand(p => SetChecked(Selected(p), false), p => Selected(p).Any(q => q.IsChecked));
         CheckCurrentAndNextCommand = new AsyncCommand(CheckCurrentAndNextAsync, () => Current is not null);
         ToggleMuteCommand = new RelayCommand(() => IsMuted = !IsMuted);
+        DoubleBpmCommand = new RelayCommand(() => SetManualBpm(NowBpm * 2), () => NowBpm is not null);
+        HalveBpmCommand = new RelayCommand(() => SetManualBpm(NowBpm / 2), () => NowBpm is not null);
+        ResetBpmCommand = new RelayCommand(() => SetManualBpm(null), () => Current is { } c && _analysis.GetManualBpm(c.Track.TrackId) is not null);
         OpenVisualizerCommand = new RelayCommand(() => VisualizerRequested?.Invoke());
 
         LoadQueue();
@@ -219,6 +223,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public ICommand CheckCurrentAndNextCommand { get; }
 
     public ICommand ToggleMuteCommand { get; }
+
+    /// <summary>再生中の曲の BPM を手動で 2 倍に直す (自動の推定は 100 と 200 などを取り違えることがあるため)。</summary>
+    public ICommand DoubleBpmCommand { get; }
+
+    /// <summary>再生中の曲の BPM を手動で半分に直す。</summary>
+    public ICommand HalveBpmCommand { get; }
+
+    /// <summary>手動で直した BPM を消して、自動の推定に戻す。</summary>
+    public ICommand ResetBpmCommand { get; }
 
     public int CheckedCount => _checked.Count;
 
@@ -1450,6 +1463,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         // 解析済みの曲でも、ビジュアライザ用の音域ごとの音量はメモリにしか無いので解析し直す (ダウンロードは再生と共用)
         var cached = _analysis.TryGet(trackId);
+        // 古いやり方で解析した結果 (BPM の求め方を変える前) なら、解析し直した結果で置き換える
+        var upToDate = cached is { Version: >= TrackAnalysis.CurrentVersion };
         if (cached is not null)
         {
             ShowAnalysis(cached);
@@ -1483,7 +1498,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                             NowSpectrum = spectrum;
                         }
                     }));
-                if (cached is not null)
+                if (upToDate)
                 {
                     return;
                 }
@@ -1491,9 +1506,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 _ui.BeginInvoke(() =>
                 {
                     _analysis.Save(trackId, result);
+                    _analysis.TryGetBpm(trackId, out var shown); // 手動で直していればその値
                     foreach (var row in Queue.Concat(Browse.Tracks).Where(r => r.Track.TrackId == trackId))
                     {
-                        row.SetBpm(true, result.Bpm);
+                        row.SetBpm(true, shown);
                     }
 
                     if (!cts.IsCancellationRequested)
@@ -1524,18 +1540,58 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void ShowAnalysis(TrackAnalysis analysis)
     {
+        _nowAnalysis = analysis;
         NowPeaks = analysis.Peaks;
-        NowBpm = analysis.Bpm;
-        if (analysis.Bpm is { } bpm)
+        ShowBpm();
+    }
+
+    /// <summary>再生中の曲の BPM を出す (手動で直していればその値、無ければ自動の推定)。</summary>
+    private void ShowBpm()
+    {
+        if (_nowAnalysis is not { } analysis || Current is not { } item)
+        {
+            return;
+        }
+
+        var manual = _analysis.GetManualBpm(item.Track.TrackId);
+        NowBpm = manual ?? analysis.Bpm;
+        if (manual is { } m)
+        {
+            NowBpmText = $"{Math.Round(m):0} BPM";
+            NowBpmToolTip = $"手動で直した BPM: {m:0.#}" + (analysis.Bpm is { } auto ? $" (自動の推定: {auto:0.0})" : "")
+                + "\n右クリックで 2 倍 / 半分 / 自動の推定に戻す";
+        }
+        else if (analysis.Bpm is { } bpm)
         {
             NowBpmText = $"{Math.Round(bpm):0} BPM";
-            NowBpmToolTip = $"推定 BPM: {bpm:0.0} (確からしさ {analysis.BpmConfidence:0.00})\n曲から自動で推定した目安です。倍や半分になっていることがあります";
+            NowBpmToolTip = $"推定 BPM: {bpm:0.0} (確からしさ {analysis.BpmConfidence:0.00})\n曲から自動で推定した目安です。倍や半分になっていることがあります (右クリックで 2 倍 / 半分に直せます)";
         }
         else
         {
             NowBpmText = "BPM —";
             NowBpmToolTip = "テンポがはっきりしないため、BPM を推定できませんでした";
         }
+
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>再生中の曲の BPM を手動で直す (null で自動の推定に戻す)。キューと「探す」の BPM 列も直す。</summary>
+    private void SetManualBpm(double? bpm)
+    {
+        if (Current is not { } item)
+        {
+            return;
+        }
+
+        var trackId = item.Track.TrackId;
+        _analysis.SetManualBpm(trackId, bpm is { } b ? Math.Round(Math.Clamp(b, 20, 400), 1) : null);
+        var known = _analysis.TryGetBpm(trackId, out var shown);
+        foreach (var row in Queue.Concat(Browse.Tracks).Where(r => r.Track.TrackId == trackId))
+        {
+            row.SetBpm(known, shown);
+        }
+
+        ShowBpm();
     }
 
     /// <summary>再生中の曲のダウンロードと解析をやめる (再生を止めてから呼ぶ)。</summary>
@@ -1545,6 +1601,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _analysisCts = null;
         _download?.Dispose();
         _download = null;
+        _nowAnalysis = null;
         NowPeaks = null;
         NowBpm = null;
         NowSpectrum = null;

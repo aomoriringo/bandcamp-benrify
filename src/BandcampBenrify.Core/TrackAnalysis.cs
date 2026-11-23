@@ -9,6 +9,12 @@ public sealed record TrackAnalysis
     /// <summary>波形は 1 秒あたりこの数の値で持つ。</summary>
     public const int PeaksPerSecond = 10;
 
+    /// <summary>解析のやり方の版。BPM の求め方を変えたら上げる (古い版で保存された結果は、次に再生したときに解析し直して置き換える)。</summary>
+    public const int CurrentVersion = 2;
+
+    /// <summary>この結果を出した解析の版 (版を持たない古い結果は 0)。</summary>
+    public int Version { get; init; }
+
     /// <summary>0.1 秒ごとの音量 (RMS。0〜255)。</summary>
     public byte[] Peaks { get; init; } = [];
 
@@ -35,8 +41,8 @@ public sealed class AudioAnalyzer
     private const int BandCount = 24;
     private const double LowestHz = 40;
     private const double HighestHz = 11000;
-    private const double MinBpm = 60;
-    private const double MaxBpm = 200;
+    private const double MinBpmDefault = 60;
+    private const double MaxBpmDefault = 260;
 
     private readonly int _samplesPerPeak;
     private readonly List<byte> _peaks = [];
@@ -123,6 +129,7 @@ public sealed class AudioAnalyzer
         var (bpm, confidence) = EstimateTempo(_flux, FramesPerSecond);
         return new TrackAnalysis
         {
+            Version = TrackAnalysis.CurrentVersion,
             Peaks = [.. _peaks],
             Bpm = confidence >= MinConfidence ? bpm : null,
             BpmConfidence = Math.Round(confidence, 3),
@@ -214,9 +221,22 @@ public sealed class AudioAnalyzer
         }
     }
 
-    /// <summary>立ち上がりの強さの推移から BPM と確からしさを求める。短すぎる・無音などで求まらなければ (null, 0)。</summary>
-    internal static (double? Bpm, double Confidence) EstimateTempo(IReadOnlyList<float> flux, double fps)
+    /// <summary>BPM の求め方の調整値 (答え合わせの実験用に差し替えられるようにしてある)。</summary>
+    internal sealed record TempoOptions
     {
+        public double MinBpm { get; init; } = MinBpmDefault;
+        public double MaxBpm { get; init; } = MaxBpmDefault;
+        public double PriorCenter { get; init; } = 170;
+        public double PriorWidth { get; init; } = 0.8;
+        public double HalfBeatWeight { get; init; } = 0.15;
+    }
+
+    internal IReadOnlyList<float> Flux => _flux;
+
+    /// <summary>立ち上がりの強さの推移から BPM と確からしさを求める。短すぎる・無音などで求まらなければ (null, 0)。</summary>
+    internal static (double? Bpm, double Confidence) EstimateTempo(IReadOnlyList<float> flux, double fps, TempoOptions? options = null)
+    {
+        var o = options ?? new TempoOptions();
         var n = flux.Count;
         if (n < fps * 10)
         {
@@ -292,18 +312,21 @@ public sealed class AudioAnalyzer
             return sum / k;
         }
 
-        // 135 BPM を中心にした緩い好み (倍・半分の取り違えを減らす)
-        // (中心と幅は、BPM が付いている手元の曲 160 曲での答え合わせで決めた)
-        static double Prior(double bpm) => Math.Exp(-0.5 * Math.Pow(Math.Log2(bpm / 135) / 0.8, 2));
+        // 170 BPM を中心にした緩い好み (倍・半分の取り違えを減らす)
+        // (中心と幅・8 分音符の加点・上限 260 は、BPM が付いている手元の曲での答え合わせで決めた。
+        //  普通の曲 160 曲は正解 133 → 131、BPM 170 以上の曲 188 曲は 83 → 169。
+        //  前は 135 を中心・上限 200 にしていて、200 を超える曲が半分の BPM になっていた。100 前後の曲は倍に出やすくなった)
+        double Prior(double bpm) => Math.Exp(-0.5 * Math.Pow(Math.Log2(bpm / o.PriorCenter) / o.PriorWidth, 2));
 
-        var minLag = 60 * fps / MaxBpm;
-        var maxLag = 60 * fps / MinBpm;
+        var minLag = 60 * fps / o.MaxBpm;
+        var maxLag = 60 * fps / o.MinBpm;
         var scores = new List<double>();
         double bestScore = double.MinValue, bestLag = 0, bestComb = 0;
         for (var p = minLag; p <= maxLag; p += 0.05)
         {
-            // 半拍 (8 分音符) にも音があることを少し加点する (拍の 1.5 倍・1.25 倍を拍と取り違えにくくする)
-            var c = Comb(p, 4) + 0.25 * AcAt(p / 2);
+            // 半拍 (8 分音符) にも音があることを少し加点する (拍の 1.5 倍・1.25 倍を拍と取り違えにくくする。
+            // 強くしすぎると、速い曲を「半分の BPM で 8 分音符が鳴っている」と取り違える)
+            var c = Comb(p, 4) + o.HalfBeatWeight * AcAt(p / 2);
             scores.Add(c);
             var s = c * Prior(60 * fps / p);
             if (s > bestScore)
@@ -337,6 +360,12 @@ public sealed class AudioAnalyzer
     /// <param name="onSpectrum">解析を始めた時点で、音域ごとの音量の推移 (解析しながら増えていく) を渡す。</param>
     public static TrackAnalysis AnalyzeMp3(Stream mp3, Action<byte[]>? onPeaks = null, CancellationToken ct = default, Action<SpectrumTimeline>? onSpectrum = null)
     {
+        return Decode(mp3, onPeaks, ct, onSpectrum).Finish();
+    }
+
+    /// <summary>mp3 を最後まで読んで解析器に通す (BPM などはまだ求めない)。</summary>
+    internal static AudioAnalyzer Decode(Stream mp3, Action<byte[]>? onPeaks = null, CancellationToken ct = default, Action<SpectrumTimeline>? onSpectrum = null)
+    {
         using var mpeg = new MpegFile(mp3);
         var channels = Math.Max(1, mpeg.Channels);
         var analyzer = new AudioAnalyzer(mpeg.SampleRate);
@@ -368,7 +397,7 @@ public sealed class AudioAnalyzer
             }
         }
 
-        return analyzer.Finish();
+        return analyzer;
     }
 }
 
@@ -455,13 +484,49 @@ public sealed class TrackAnalysisStore(DiskCache cache, Func<DateTimeOffset>? cl
     public const string Namespace = "analysis";
     private const string IndexKey = "bpm-index";
 
+    /// <summary>手動で直した BPM (自動の推定とは別に持つ。解析し直しても、解析のキャッシュを消しても残す)。</summary>
+    private const string ManualKey = "bpm-manual";
+
     private readonly Func<DateTimeOffset> _clock = clock ?? (() => DateTimeOffset.UtcNow);
     private Dictionary<long, double?>? _index;
+    private Dictionary<long, double>? _manual;
 
     private Dictionary<long, double?> Index => _index ??= cache.TryGet<Dictionary<long, double?>>(Namespace, IndexKey)?.Value ?? [];
 
-    /// <summary>解析済みか。解析済みでテンポが分からなかった曲は true で bpm が null。</summary>
-    public bool TryGetBpm(long trackId, out double? bpm) => Index.TryGetValue(trackId, out bpm);
+    private Dictionary<long, double> Manual => _manual ??= cache.TryGet<Dictionary<long, double>>(Namespace, ManualKey)?.Value ?? [];
+
+    /// <summary>
+    /// 表示する BPM (手動で直していればその値、無ければ自動の推定)。
+    /// 解析済みか手動で直していれば true。解析済みでテンポが分からなかった曲は true で bpm が null。
+    /// </summary>
+    public bool TryGetBpm(long trackId, out double? bpm)
+    {
+        if (Manual.TryGetValue(trackId, out var manual))
+        {
+            bpm = manual;
+            return true;
+        }
+
+        return Index.TryGetValue(trackId, out bpm);
+    }
+
+    /// <summary>手動で直した BPM (直していなければ null)。</summary>
+    public double? GetManualBpm(long trackId) => Manual.TryGetValue(trackId, out var bpm) ? bpm : null;
+
+    /// <summary>手動で BPM を直す。null で手動の値を消して自動の推定に戻す。</summary>
+    public void SetManualBpm(long trackId, double? bpm)
+    {
+        if (bpm is { } value)
+        {
+            Manual[trackId] = value;
+        }
+        else if (!Manual.Remove(trackId))
+        {
+            return;
+        }
+
+        cache.Set(Namespace, ManualKey, Manual, _clock());
+    }
 
     public TrackAnalysis? TryGet(long trackId) => cache.TryGet<TrackAnalysis>(Namespace, TrackKey(trackId))?.Value;
 
@@ -473,10 +538,16 @@ public sealed class TrackAnalysisStore(DiskCache cache, Func<DateTimeOffset>? cl
         cache.Set(Namespace, IndexKey, Index, now);
     }
 
+    /// <summary>解析結果を消す (手動で直した BPM は残す)。</summary>
     public void Clear()
     {
+        var manual = Manual;
         cache.Clear(Namespace);
         _index = [];
+        if (manual.Count > 0)
+        {
+            cache.Set(Namespace, ManualKey, manual, _clock());
+        }
     }
 
     private static string TrackKey(long trackId) => $"track-{trackId}";

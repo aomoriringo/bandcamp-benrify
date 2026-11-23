@@ -38,18 +38,28 @@ public sealed class AnalysisTests
         return analyzer.Finish();
     }
 
+    // 100 以下で裏拍にハイハットがあると、半拍ごと (倍の BPM) にも音が並ぶので倍に出ることがある。
+    // 速い曲 (200 超え) を半分にしないことを優先した (TrackAnalysis の Prior の説明を参照)
     [Theory]
     [InlineData(128)]
-    [InlineData(100)]
     [InlineData(140)]
     [InlineData(174)]
-    [InlineData(87.5)]
+    [InlineData(200)]
+    [InlineData(220)]
     public void EstimatesTheTempoOfASteadyBeat(double bpm)
     {
         var result = Analyze(Beat(bpm, 40));
         Assert.NotNull(result.Bpm);
         Assert.InRange(result.Bpm!.Value, bpm - 0.5, bpm + 0.5);
         Assert.True(result.BpmConfidence >= AudioAnalyzer.MinConfidence);
+    }
+
+    [Fact]
+    public void NewAnalysesCarryTheCurrentVersion()
+    {
+        // 版を持たない古い結果 (0) は、次に再生したときに解析し直して置き換える
+        Assert.Equal(TrackAnalysis.CurrentVersion, Analyze(Beat(128, 20)).Version);
+        Assert.Equal(0, new TrackAnalysis().Version);
     }
 
     [Fact]
@@ -154,6 +164,45 @@ public sealed class AnalysisTests
             reopened.Clear();
             Assert.False(reopened.TryGetBpm(1, out _));
             Assert.Null(reopened.TryGet(1));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ManualBpmWinsAndSurvivesReanalysisAndClearing()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "bcb-analysis-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var cache = new DiskCache(dir);
+            var store = new TrackAnalysisStore(cache);
+            store.Save(1, new TrackAnalysis { Bpm = 105 });
+            store.SetManualBpm(1, 210);
+            store.SetManualBpm(2, 174); // まだ解析していない曲でも持てる
+
+            var reopened = new TrackAnalysisStore(cache);
+            Assert.True(reopened.TryGetBpm(1, out var bpm));
+            Assert.Equal(210, bpm);
+            Assert.Equal(210, reopened.GetManualBpm(1));
+
+            // 解析し直しても手動の値が優先
+            reopened.Save(1, new TrackAnalysis { Bpm = 104, Version = TrackAnalysis.CurrentVersion });
+            Assert.True(reopened.TryGetBpm(1, out bpm));
+            Assert.Equal(210, bpm);
+
+            // 解析のキャッシュを消しても手動の値は残る
+            reopened.Clear();
+            Assert.Null(reopened.TryGet(1));
+            Assert.Equal(210, new TrackAnalysisStore(cache).GetManualBpm(1));
+
+            // 自動の推定に戻す
+            reopened.SetManualBpm(1, null);
+            Assert.Null(new TrackAnalysisStore(cache).GetManualBpm(1));
+            Assert.False(new TrackAnalysisStore(cache).TryGetBpm(1, out _));
+            Assert.Equal(174, new TrackAnalysisStore(cache).GetManualBpm(2));
         }
         finally
         {

@@ -243,6 +243,15 @@
                     <Border HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,62,0" Padding="12,4" CornerRadius="12"
                             Background="#1AFFFFFF" ToolTip="{Binding NowBpmToolTip}"
                             Visibility="{Binding HasNowBpmText, Converter={StaticResource BoolToVis}}">
+                        <!-- 自動の推定は倍・半分を取り違えることがあるので、右クリックで直せる (めったに使わないので目立たせない) -->
+                        <Border.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="BPM を 2 倍にする" Command="{Binding DoubleBpmCommand}" />
+                                <MenuItem Header="BPM を半分にする" Command="{Binding HalveBpmCommand}" />
+                                <Separator />
+                                <MenuItem Header="自動の推定に戻す" Command="{Binding ResetBpmCommand}" />
+                            </ContextMenu>
+                        </Border.ContextMenu>
                         <TextBlock Text="{Binding NowBpmText}" FontSize="15" FontWeight="SemiBold" Foreground="{StaticResource TextBrush}" />
                     </Border>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">

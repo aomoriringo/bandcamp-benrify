@@ -16,7 +16,7 @@ namespace BandcampBenrify;
 /// </summary>
 public partial class VisualizerWindow : Window
 {
-    private const int RingColorCount = 6;
+    private const int RingColorCount = MusicVisual.Bands;
 
     /// <summary>舞台の幅の下限 (これより細いウィンドウでは幅で縮める)。</summary>
     private const double StageMinWidth = 1000;
@@ -27,10 +27,12 @@ public partial class VisualizerWindow : Window
     /// <summary>ジャケットを回すときの 1 回転の秒数 (ゆっくり)。</summary>
     private const double SpinSeconds = 20;
 
-    /// <summary>輪の色が色相をひと回りする秒数 (ゆっくり)。</summary>
-    private const double HueCycleSeconds = 120;
-
     private double _spinAngle;
+
+    // 調整用のパネル (Debug ビルドだけ。VisualizerWindow.Tuning.cs)。Release ビルドではどちらも何もしない
+    partial void InitTuning();
+
+    partial void OnTuningKey(KeyEventArgs e);
 
     private readonly MainViewModel _vm;
     private readonly DispatcherTimer _hideTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
@@ -73,6 +75,7 @@ public partial class VisualizerWindow : Window
             _hideTimer.Stop();
         };
 
+        InitTuning();
         ApplyColors(null);
         ShowTrack();
         ShowAnalysis();
@@ -155,6 +158,7 @@ public partial class VisualizerWindow : Window
         }
 
         Wave.Peaks = _vm.NowPeaks;
+        Motion.Bpm = _vm.NowBpm;
         BpmText.Text = _vm.NowBpm is { } bpm ? Math.Round(bpm).ToString("0") : _vm.NowBpmText.Contains('…') ? "…" : "—";
         BpmStat.Visibility = _vm.NowBpmText.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -233,7 +237,7 @@ public partial class VisualizerWindow : Window
     private void ApplyRingColors()
     {
         _appliedHueShift = _hueShift;
-        Ring.SetColors(ArtPalette.Shades(_ringBase, RingColorCount, hueShift: _hueShift).Select(ArtColors.ToColor).ToList());
+        Motion.SetColors(ArtPalette.Shades(_ringBase, RingColorCount, Motion.Tuning.HueSpread, _hueShift).Select(ArtColors.ToColor).ToList());
     }
 
     private void OnThemeChanged()
@@ -269,13 +273,13 @@ public partial class VisualizerWindow : Window
             read = spectrum.TryRead(seconds, _bands.AsSpan(0, spectrum.Bands));
         }
 
-        // 止めている / まだ解析が追いついていないときは輪を縮める
-        Ring.Update(read ? _bands.AsSpan(0, spectrum!.Bands) : ReadOnlySpan<float>.Empty, dt);
+        // 止めている / まだ解析が追いついていないときは静める
+        Motion.Update(read ? _bands.AsSpan(0, spectrum!.Bands) : ReadOnlySpan<float>.Empty, dt, _vm.IsPlaying);
 
         // 輪の色をゆっくり移り変わらせる (再生中だけ。1 度以上変わったときだけ塗り直す)
         if (_vm.IsPlaying)
         {
-            _hueShift = (_hueShift + dt * 360 / HueCycleSeconds) % 360;
+            _hueShift = (_hueShift + dt * 360 / Math.Max(1, Motion.Tuning.HueCycleSeconds)) % 360;
             var moved = Math.Abs(_hueShift - _appliedHueShift);
             if (Math.Min(moved, 360 - moved) >= 1)
             {
@@ -408,6 +412,12 @@ public partial class VisualizerWindow : Window
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
     {
+        OnTuningKey(e);
+        if (e.Handled)
+        {
+            return;
+        }
+
         if (e.Key == Key.F11)
         {
             SetFullScreen(!_fullScreen);
