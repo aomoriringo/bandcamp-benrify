@@ -26,6 +26,14 @@ public partial class MainWindow : Window
         // 波形 (シークバー) を押したとき。つまみ以外を押すと Slider が自分で処理済みにするので、処理済みでも受け取る
         SeekBar.AddHandler(PreviewMouseLeftButtonDownEvent, new MouseButtonEventHandler(SeekBar_MouseDown), handledEventsToo: true);
 
+        // 「探す」の追加ボタン: 押すと入れるキューを選ぶメニューを出す (使えるかどうかは元の追加のコマンドに合わせる)
+        AddReleaseButton.Command = new RelayCommand(
+            () => OpenQueuePicker(AddReleaseButton, "releases", Vm?.Browse.SelectedItem is { } release ? [release] : []),
+            () => Vm?.Browse.AddCurrentReleaseCommand.CanExecute(null) == true);
+        AddTracksButton.Command = new RelayCommand(
+            () => OpenQueuePicker(AddTracksButton, "tracks", TrackGrid.SelectedItems.Cast<object>().ToList()),
+            () => TrackGrid.SelectedItems.Count > 0);
+
         DataContextChanged += (_, e) =>
         {
             if (e.NewValue is MainViewModel vm)
@@ -365,6 +373,123 @@ public partial class MainWindow : Window
             Vm.PlayItemCommand.Execute(item);
         }
     }
+
+    /// <summary>キューの切り替え欄: ダブルクリックで名前を変更。</summary>
+    private void QueueTab_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is ListBoxItem { DataContext: QueueListItemViewModel queue } && Vm is { } vm)
+        {
+            e.Handled = Run(vm.RenameQueueCommand, queue);
+        }
+    }
+
+    /// <summary>
+    /// 右クリックの「キューに追加」系のサブメニュー: 開くたびに、今あるキューの一覧と「新しいキューを作って…」を並べる。
+    /// Tag: tracks (探す の曲目) / releases (探す の作品一覧) / copy・move (キューの曲を別のキューへ)。
+    /// </summary>
+    private void AddToQueueMenu_SubmenuOpened(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menu || !ReferenceEquals(e.OriginalSource, menu) || Vm is not { } vm)
+        {
+            return;
+        }
+
+        DependencyObject? d = menu;
+        while (d is not null and not System.Windows.Controls.ContextMenu)
+        {
+            d = LogicalTreeHelper.GetParent(d);
+        }
+
+        var selected = ((d as System.Windows.Controls.ContextMenu)?.PlacementTarget as DataGrid)?.SelectedItems.Cast<object>().ToList() ?? [];
+        FillQueueMenu(menu, vm, menu.Tag as string, selected);
+    }
+
+    /// <summary>
+    /// 「探す」の「この作品の全曲をキューに追加」「選択した曲をキューに追加」: 押すと、入れるキューを選ぶメニューを出す。
+    /// </summary>
+    private void OpenQueuePicker(Button button, string kind, List<object> selected)
+    {
+        if (Vm is not { } vm)
+        {
+            return;
+        }
+
+        var menu = new System.Windows.Controls.ContextMenu { PlacementTarget = button, Placement = PlacementMode.Bottom };
+        FillQueueMenu(menu, vm, kind, selected);
+        menu.IsOpen = true;
+    }
+
+    /// <summary>キューの一覧と「新しいキューを作って…」を並べる。選ぶと <paramref name="selected"/> をそのキューに入れる。</summary>
+    private static void FillQueueMenu(ItemsControl menu, MainViewModel vm, string? kind, List<object> selected)
+    {
+        var toOther = kind is "copy" or "move";
+        menu.Items.Clear();
+        foreach (var queue in vm.Queues)
+        {
+            if (toOther && ReferenceEquals(queue, vm.SelectedQueue))
+            {
+                continue; // 表示しているキュー自身には入れない
+            }
+
+            var label = $"{queue.Name}  ({queue.Count})";
+            var item = new MenuItem { Header = new TextBlock { Text = label }, IsEnabled = selected.Count > 0 };
+            var saved = queue.Saved;
+            item.Click += (_, _) => AddSelectionTo(vm, kind, selected, saved);
+            menu.Items.Add(item);
+        }
+
+        if (menu.Items.Count > 0)
+        {
+            menu.Items.Add(new Separator());
+        }
+
+        var create = new MenuItem
+        {
+            Header = new TextBlock { Text = kind == "move" ? "新しいキューを作って移動…" : "新しいキューを作って追加…" },
+            IsEnabled = selected.Count > 0,
+        };
+        create.Click += (_, _) =>
+        {
+            if (vm.CreateQueue() is { } saved)
+            {
+                AddSelectionTo(vm, kind, selected, saved);
+            }
+        };
+        menu.Items.Add(create);
+    }
+
+    private static void AddSelectionTo(MainViewModel vm, string? kind, List<object> selected, SavedQueue target)
+    {
+        switch (kind)
+        {
+            case "tracks":
+                vm.Browse.AddTracksTo(selected.OfType<QueueItemViewModel>().ToList(), target);
+                break;
+            case "releases":
+                if (selected.OfType<BrowseItemViewModel>().Where(r => r.IsRelease).ToList() is { Count: > 0 } releases)
+                {
+                    _ = MainViewModel.RunSafeAsync(vm.Browse.AddReleasesAsync(releases, target));
+                }
+
+                break;
+            case "copy":
+            case "move":
+                vm.CopyToQueue(selected.OfType<QueueItemViewModel>().ToList(), target, move: kind == "move");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// キューの名前の並びのすぐ右に「新しいキュー」を置く。並びが長くなったら、ボタンの分を残して折り返す。
+    /// </summary>
+    private void QueueBar_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var button = NewQueueButton.ActualWidth > 0 ? NewQueueButton.ActualWidth : 160;
+        QueueTabs.MaxWidth = Math.Max(0, QueueBar.ActualWidth - button - 8);
+    }
+
+    /// <summary>キューの切り替え欄: 右クリックはメニューを出すだけで、キューは切り替えない。</summary>
+    private void QueueTab_PreviewMouseRightButtonDown(object sender, MouseButtonEventArgs e) => e.Handled = true;
 
     private static T? FindAncestor<T>(DependencyObject? d)
         where T : DependencyObject

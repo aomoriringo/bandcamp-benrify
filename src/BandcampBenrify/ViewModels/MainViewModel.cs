@@ -29,6 +29,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AudioPlayer _player = new(Dispatcher.CurrentDispatcher);
     private readonly PlaybackOrder<QueueItemViewModel> _order = new();
     private readonly HashSet<long> _queuedTrackIds = [];
+
+    /// <summary>すべてのキュー (保存する中身)。表示しているキューの曲は <see cref="Queue"/> にあり、保存のときに書き戻す。</summary>
+    private QueueLibrary _library = QueueLibrary.CreateDefault();
+
+    /// <summary>表示している (曲を追加する先の) キュー。</summary>
+    private QueueListItemViewModel _shownQueue = null!;
+
+    /// <summary>再生中の曲を、そのとき表示していたキューから再生し始めたか (試聴ではない)。キューを切り替えても次の曲へ進む。</summary>
+    private bool _currentFromQueue;
     private readonly DispatcherTimer _timer;
     private readonly DispatcherTimer _pendingTimer;
     private CancellationTokenSource _jobsCts = new();
@@ -156,16 +165,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         Browse = new BrowseViewModel(this, _client);
 
-        AddUrlCommand = new AsyncCommand(
-            async () =>
-            {
-                var url = InputUrl;
-                if (await AddUrlAsync(url) > 0 && InputUrl == url)
-                {
-                    InputUrl = ""; // 成功したら次の URL を貼りやすいように空にする
-                }
-            },
-            () => LooksLikeUrl(InputUrl));
         OpenInBrowseCommand = new AsyncCommand(
             () =>
             {
@@ -180,7 +179,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RemoveSelectedCommand = new RelayCommand(p => RemoveItems(Selected(p)), p => p is IList { Count: > 0 });
         ClearQueueCommand = new RelayCommand(() =>
         {
-            if (MessageBox.Show($"キューの {Queue.Count} 曲をすべて削除しますか？", "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
+            if (MessageBox.Show($"{QueueLabel}の {Queue.Count} 曲をすべて削除しますか？", "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
             {
                 RemoveItems(Queue.ToList());
             }
@@ -200,6 +199,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         HalveBpmCommand = new RelayCommand(() => SetManualBpm(NowBpm / 2), () => NowBpm is not null);
         ResetBpmCommand = new RelayCommand(() => SetManualBpm(null), () => Current is { } c && _analysis.GetManualBpm(c.Track.TrackId) is not null);
         OpenVisualizerCommand = new RelayCommand(() => VisualizerRequested?.Invoke());
+        NewQueueCommand = new RelayCommand(NewQueue);
+        RenameQueueCommand = new RelayCommand(p => RenameQueue(p as QueueListItemViewModel ?? _shownQueue));
+        DeleteQueueCommand = new RelayCommand(p => DeleteQueue(p as QueueListItemViewModel ?? _shownQueue), _ => Queues.Count > 1);
 
         LoadQueue();
         LoadCachedCollection();
@@ -317,7 +319,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private void RememberCurrentIndex()
     {
-        if (Current is not null && PlaybackList().IndexOf(Current) is var i and >= 0)
+        if (CurrentInQueue() is { } current && PlaybackList().IndexOf(current) is var i and >= 0)
         {
             _currentIndexHint = i;
         }
@@ -342,10 +344,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                || (s.Contains('.') && s.Contains('/') && !s.Contains(' '));
     }
 
+    /// <summary>表示しているキューに入っているか (「探す」の曲目の「キュー」列)。</summary>
     public bool IsQueued(long trackId) => _queuedTrackIds.Contains(trackId);
 
     /// <summary>キューに入っていない曲 (試聴) を再生中か。</summary>
-    public bool IsPreview => Current is not null && !_queuedTrackIds.Contains(Current.Track.TrackId);
+    public bool IsPreview => Current is not null && !_currentFromQueue && !_queuedTrackIds.Contains(Current.Track.TrackId);
+
+    /// <summary>
+    /// 表示しているキューの中で、再生中の曲にあたる行。
+    /// 別のキューから再生し始めた曲でも、同じ曲がこのキューにあればその行 (無ければ再生中の曲そのもの)。
+    /// </summary>
+    private QueueItemViewModel? CurrentInQueue()
+    {
+        if (Current is not { } current || !_queuedTrackIds.Contains(current.Track.TrackId))
+        {
+            return Current;
+        }
+
+        return _playingTwin ?? current;
+    }
 
     /// <summary>「探す」から: キューに入れずに試聴する。</summary>
     public Task PreviewAsync(QueueItemViewModel item) => PlayItemAsync(item, userInitiated: true);
@@ -369,8 +386,6 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     /// <summary>並び替え・絞り込み済みのキュー。シャッフルしないときはこの順に再生する。</summary>
     public ICollectionView QueueView { get; }
-
-    public ICommand AddUrlCommand { get; }
 
     public ICommand PlayPauseCommand { get; }
 
@@ -435,6 +450,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     public bool HasCurrent => Current is not null;
 
+    /// <summary>キューを切り替えたとき、再生中の曲と同じ曲の行 (再生中の印を付ける)。</summary>
+    private QueueItemViewModel? _playingTwin;
+
     public QueueItemViewModel? Current
     {
         get => _current;
@@ -443,6 +461,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             if (_current is not null)
             {
                 _current.IsPlaying = false;
+            }
+
+            if (_playingTwin is not null)
+            {
+                _playingTwin.IsPlaying = false;
+                _playingTwin = null;
             }
 
             if (Set(ref _current, value))
@@ -810,6 +834,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
 
         var kind = BandcampUrls.Classify(normalized);
+        var target = QueueTarget; // 追加の途中でキューを切り替えても、始めたときのキューに入れる
         var ct = _jobsCts.Token;
         ActiveJobs++;
         var added = 0;
@@ -849,13 +874,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             await foreach (var track in _client.ResolveTracksAsync(normalized, progress, ct))
             {
                 found++;
-                added += AddTracks([track]);
+                added += AddTracks([track], target);
             }
 
             var skipped = found - added;
             StatusText = found == 0
                 ? "再生できる曲が見つかりませんでした (試聴が公開されていない作品の可能性があります)"
-                : $"{added} 曲をキューに追加しました"
+                : $"{added} 曲を{QueueLabelOf(target)}に追加しました"
                     + (skipped > 0 ? $" ({skipped} 曲は追加済みのためスキップ)" : "")
                     + (noAudio > 0 ? $" (試聴できない作品: {noAudio})" : "")
                     + (errors > 0 ? $" (取得に失敗した作品: {errors})" : "")
@@ -879,9 +904,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         return found;
     }
 
-    /// <summary>キューに曲を追加する。既に入っている曲はスキップ。追加数を返す。</summary>
-    public int AddTracks(IEnumerable<TrackInfo> tracks)
+    /// <summary>
+    /// キューに曲を追加する。既に入っている曲はスキップ。追加数を返す。
+    /// <paramref name="target"/> を省くと表示しているキューに入れる。表示していないキュー (や消したキュー) なら、保存する中身にだけ足す。
+    /// </summary>
+    public int AddTracks(IEnumerable<TrackInfo> tracks, SavedQueue? target = null)
     {
+        if (target is not null && !ReferenceEquals(target, _shownQueue.Saved))
+        {
+            return AddToHiddenQueue(tracks, target);
+        }
+
         var added = new List<QueueItemViewModel>();
         foreach (var track in tracks)
         {
@@ -907,7 +940,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         foreach (var item in items)
         {
-            if (ReferenceEquals(item, Current))
+            if (ReferenceEquals(item, Current) || ReferenceEquals(item, _playingTwin))
             {
                 StopPlayback();
             }
@@ -956,14 +989,230 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         UpdateQueueMaxSupporters();
         SchedulePendingUpdate();
         OnPropertyChanged(nameof(QueueSummary));
-        OnPropertyChanged(nameof(QueueHeader));
         OnPropertyChanged(nameof(IsQueueEmpty));
         OnPropertyChanged(nameof(NowSubtitle));
+        _shownQueue.Count = Queue.Count;
         Browse.RefreshQueuedFlags();
         CommandManager.InvalidateRequerySuggested();
     }
 
-    public string QueueHeader => $"キュー ({Queue.Count})";
+    // ---- 複数のキュー ----
+
+    /// <summary>すべてのキュー (作った順)。</summary>
+    public ObservableCollection<QueueListItemViewModel> Queues { get; } = [];
+
+    /// <summary>表示している (曲を追加する先の) キュー。切り替えても再生中の曲はそのまま流れ、次の曲からこのキューで続ける。</summary>
+    public QueueListItemViewModel SelectedQueue
+    {
+        get => _shownQueue;
+        set
+        {
+            if (value is null || ReferenceEquals(value, _shownQueue) || !Queues.Contains(value))
+            {
+                return;
+            }
+
+            StoreShownTracks();
+            ShowQueue(value);
+            SaveQueue();
+        }
+    }
+
+    /// <summary>
+    /// 行き先を選ばない追加 (Chrome 拡張・コマンドライン・「探す」の Ctrl+Enter) で曲を入れるキュー: 表示しているキュー。
+    /// 時間のかかる追加は、始めたときのキューに入れるためにこれを覚えておく。
+    /// </summary>
+    public SavedQueue QueueTarget => _shownQueue.Saved;
+
+    /// <summary>メッセージ用の「キュー」/「「名前」」(キューが 1 つだけなら名前を出さない)。</summary>
+    public string QueueLabel => QueueLabelOf(_shownQueue.Saved);
+
+    public string QueueLabelOf(SavedQueue queue) => Queues.Count > 1 ? $"「{queue.Name}」" : "キュー";
+
+    public ICommand NewQueueCommand { get; }
+
+    public ICommand RenameQueueCommand { get; }
+
+    public ICommand DeleteQueueCommand { get; }
+
+    private void ShowQueue(QueueListItemViewModel queue)
+    {
+        _shownQueue = queue;
+        Queue.Clear();
+        _queuedTrackIds.Clear();
+        _nextSeq = 0;
+        _order.Reset();
+        _currentIndexHint = -1;
+        if (_playingTwin is not null)
+        {
+            _playingTwin.IsPlaying = false;
+            _playingTwin = null;
+        }
+
+        AddTracks(queue.Saved.Tracks);
+
+        // 別のキューから流れている曲が、このキューにもあればその行に再生中の印を付け、次の曲もその位置から続ける
+        if (Current is { } current && !Queue.Contains(current)
+            && Queue.FirstOrDefault(q => q.Track.TrackId == current.Track.TrackId) is { } twin)
+        {
+            _playingTwin = twin;
+            twin.IsPlaying = true;
+        }
+
+        RememberCurrentIndex();
+        OnQueueChanged();
+        UpdatePendingCount();
+        OnPropertyChanged(nameof(SelectedQueue));
+        OnPropertyChanged(nameof(IsPreview));
+        OnPropertyChanged(nameof(NowSubtitle));
+    }
+
+    /// <summary>表示しているキューの曲 (追加した順) を、保存する中身に書き戻す。</summary>
+    private void StoreShownTracks()
+    {
+        _shownQueue.Saved.Tracks = Queue.OrderBy(q => q.Seq).Select(q => q.Track with { StreamUrl = null }).ToList();
+        _library.SelectedId = _shownQueue.Saved.Id;
+    }
+
+    private int AddToHiddenQueue(IEnumerable<TrackInfo> tracks, SavedQueue target)
+    {
+        if (!_library.Queues.Contains(target))
+        {
+            return 0; // 追加の途中で消されたキュー
+        }
+
+        var ids = target.Tracks.Select(t => t.TrackId).ToHashSet();
+        var added = 0;
+        foreach (var track in tracks)
+        {
+            if (ids.Add(track.TrackId))
+            {
+                target.Tracks.Add(track with { StreamUrl = null });
+                added++;
+            }
+        }
+
+        if (Queues.FirstOrDefault(q => ReferenceEquals(q.Saved, target)) is { } item)
+        {
+            item.Count = target.Tracks.Count;
+        }
+
+        return added;
+    }
+
+    /// <summary>曲を指定したキューに入れて保存し、結果をステータスに出す。追加数を返す。</summary>
+    public int AddTracksTo(IReadOnlyCollection<TrackInfo> tracks, SavedQueue target, string? note = null)
+    {
+        var added = AddTracks(tracks, target);
+        SaveQueue();
+        StatusText = $"{added} 曲を{QueueLabelOf(target)}に追加しました"
+                     + (tracks.Count > added ? $" ({tracks.Count - added} 曲は追加済み)" : "")
+                     + (note ?? "");
+        return added;
+    }
+
+    /// <summary>キューの右クリック: 選んだ曲を別のキューにも入れる (<paramref name="move"/> なら、このキューからは消す)。</summary>
+    public void CopyToQueue(IReadOnlyCollection<QueueItemViewModel> items, SavedQueue target, bool move)
+    {
+        if (items.Count == 0 || ReferenceEquals(target, _shownQueue.Saved))
+        {
+            return;
+        }
+
+        var tracks = items.OrderBy(q => q.Seq).Select(q => q.Track).ToList();
+        var added = AddTracks(tracks, target);
+        if (move)
+        {
+            RemoveItems(items); // 保存もする
+        }
+        else
+        {
+            SaveQueue();
+        }
+
+        StatusText = $"{added} 曲を「{target.Name}」に{(move ? "移動しました" : "追加しました")}"
+                     + (tracks.Count > added ? $" ({tracks.Count - added} 曲は「{target.Name}」に入っていたので{(move ? "このキューから外しました" : "追加しませんでした")})" : "");
+    }
+
+    private void OnQueuesChanged()
+    {
+        OnPropertyChanged(nameof(QueueLabel));
+        OnPropertyChanged(nameof(HasManyQueues));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>キューが 2 つ以上あるか (1 つだけのときはキューの名前や追加先を目立たせない)。</summary>
+    public bool HasManyQueues => Queues.Count > 1;
+
+    /// <summary>名前を聞いて新しいキューを作る (表示は切り替えない)。キャンセルしたら null。</summary>
+    public SavedQueue? CreateQueue()
+    {
+        if (NamePrompt.Ask("新しいキュー", "キューの名前", _library.NextDefaultName()) is not { } name)
+        {
+            return null;
+        }
+
+        var saved = new SavedQueue { Name = name };
+        _library.Queues.Add(saved);
+        Queues.Add(new QueueListItemViewModel(saved));
+        OnQueuesChanged();
+        SaveQueue();
+        return saved;
+    }
+
+    /// <summary>「新しいキュー」ボタン: 作ったキューを表示する。</summary>
+    private void NewQueue()
+    {
+        if (CreateQueue() is not { } saved)
+        {
+            return;
+        }
+
+        var item = Queues.First(q => ReferenceEquals(q.Saved, saved));
+        SelectedQueue = item;
+        SelectedTab = 1;
+        StatusText = $"キュー「{saved.Name}」を作りました。「探す」で曲を選んで「キューに追加」から入れられます";
+    }
+
+    private void RenameQueue(QueueListItemViewModel queue)
+    {
+        if (NamePrompt.Ask("キューの名前を変更", "キューの名前", queue.Name) is not { } name || name == queue.Name)
+        {
+            return;
+        }
+
+        queue.Name = name;
+        OnQueuesChanged();
+        SaveQueue();
+    }
+
+    private void DeleteQueue(QueueListItemViewModel queue)
+    {
+        if (Queues.Count <= 1 || !Queues.Contains(queue))
+        {
+            return;
+        }
+
+        var count = ReferenceEquals(queue, _shownQueue) ? Queue.Count : queue.Saved.Tracks.Count;
+        if (MessageBox.Show(
+                $"キュー「{queue.Name}」({count} 曲) を削除しますか？\n元に戻せません (チェック済みの印は残ります)。",
+                "Bandcamp Benrify", MessageBoxButton.OKCancel, MessageBoxImage.Warning, MessageBoxResult.Cancel) != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(queue, _shownQueue))
+        {
+            var index = Queues.IndexOf(queue);
+            ShowQueue(Queues[index + 1 < Queues.Count ? index + 1 : index - 1]);
+        }
+
+        Queues.Remove(queue);
+        _library.Queues.Remove(queue.Saved);
+        OnQueuesChanged();
+        SaveQueue();
+        StatusText = $"キュー「{queue.Name}」を削除しました";
+    }
 
     // ---- 曲ごとのサポーター数・値段 ----
 
@@ -973,7 +1222,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         var details = TrackDetailsResolver.Resolve(item.Track, _client.TryGetCachedTralbum);
         item.Update(details);
         item.Purchase = TrackDetailsResolver.Purchased(item.Track, details, _ownedAlbums, _ownedTracks);
-        item.IsQueued = _queuedTrackIds.Contains(item.Track.TrackId);
+        item.IsQueued = IsQueued(item.Track.TrackId);
         item.CheckRequested ??= (row, value) => SetChecked([row], value);
         item.SetCheckedState(_checked.Contains(item.Track.TrackId));
         item.SetBpm(_analysis.TryGetBpm(item.Track.TrackId, out var bpm), bpm);
@@ -1319,7 +1568,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         var list = PlaybackList();
         QueueItemViewModel? next;
-        if (!Shuffle && Current is { } current && !list.Contains(current) && _currentIndexHint >= 0 && list.Count > 0)
+        var anchor = CurrentInQueue();
+        if (!Shuffle && anchor is { } current && !list.Contains(current) && _currentIndexHint >= 0 && list.Count > 0)
         {
             // 再生中の曲がチェックなどで表示から外れた: 外れる前の位置にいま並んでいる曲 (= 元の次の曲) へ
             next = list[_currentIndexHint % list.Count];
@@ -1327,7 +1577,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         }
         else
         {
-            next = _order.Next(list, Current);
+            next = _order.Next(list, anchor);
         }
 
         if (next is null)
@@ -1347,7 +1597,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var prev = _order.Previous(PlaybackList(), Current);
+        var prev = _order.Previous(PlaybackList(), CurrentInQueue());
         if (prev is not null)
         {
             await PlayItemAsync(prev, userInitiated: false);
@@ -1358,13 +1608,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     {
         if (userInitiated)
         {
-            _order.MarkPlayed(item, Current);
+            _order.MarkPlayed(item, CurrentInQueue());
         }
 
         _playCts?.Cancel();
         var cts = _playCts = new CancellationTokenSource();
         _player.Stop();
         ReleaseDownload();
+        _currentFromQueue = Queue.Contains(item);
         Current = item;
         RememberCurrentIndex();
         IsPlaying = false;
@@ -1699,7 +1950,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RequestStatus = text;
     }
 
-    private static async Task RunSafeAsync(Task task)
+    public static async Task RunSafeAsync(Task task)
     {
         try
         {
@@ -1760,45 +2011,33 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// <summary>読めなかったファイルを退避できなかったとき。空のキューで上書きしないよう保存を止める。</summary>
     private bool _queueSaveBlocked;
 
+    /// <summary>
+    /// queues.json を読む。まだ無ければ、キューが 1 つしか無かった頃の queue.json を「キュー」として取り込む
+    /// (queue.json は書き換えも削除もしない)。
+    /// </summary>
     private void LoadQueue()
     {
-        if (!File.Exists(AppPaths.QueueFile))
+        var result = QueueLibraryStore.Load(AppPaths.QueuesFile, AppPaths.QueueFile, DateTime.Now);
+        _library = result.Library;
+        _queueLoadError = result.Error;
+        _queueSaveBlocked = result.SaveBlocked;
+        foreach (var saved in _library.Queues)
         {
-            return;
+            Queues.Add(new QueueListItemViewModel(saved));
         }
 
-        try
+        var selected = _library.Selected;
+        ShowQueue(Queues.First(q => ReferenceEquals(q.Saved, selected)));
+        OnQueuesChanged();
+        if (result.Migrated)
         {
-            var tracks = JsonSerializer.Deserialize<List<TrackInfo>>(File.ReadAllText(AppPaths.QueueFile)) ?? [];
-            AddTracks(tracks);
+            SaveQueue();
         }
-        catch (JsonException ex)
-        {
-            // 壊れたファイルは別名で残しておく (このあとの保存で上書きして失わないように)
-            try
-            {
-                var backup = SafeFile.MoveAside(AppPaths.QueueFile, DateTime.Now);
-                _queueLoadError = $"キューを読み込めなかったので {backup} に退避しました ({ex.Message})";
-            }
-            catch (IOException)
-            {
-                BlockQueueSave(ex.Message);
-            }
-        }
-        catch (IOException ex)
-        {
-            BlockQueueSave(ex.Message);
-        }
-    }
-
-    private void BlockQueueSave(string reason)
-    {
-        _queueSaveBlocked = true;
-        _queueLoadError = $"キューを読み込めませんでした ({reason})。元のファイルを上書きしないよう、キューの変更は保存しません。アプリを再起動してください";
     }
 
     public void SaveQueue()
     {
+        StoreShownTracks();
         if (_queueSaveBlocked)
         {
             return;
@@ -1806,8 +2045,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         try
         {
-            var tracks = Queue.OrderBy(q => q.Seq).Select(q => q.Track with { StreamUrl = null }).ToList();
-            SafeFile.WriteAllTextAtomic(AppPaths.QueueFile, JsonSerializer.Serialize(tracks));
+            QueueLibraryStore.Save(AppPaths.QueuesFile, _library);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

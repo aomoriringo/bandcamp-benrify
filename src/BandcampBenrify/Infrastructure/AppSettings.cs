@@ -20,7 +20,11 @@ public static class AppPaths
 
     public static string SettingsFile => Path.Combine(DataDir, "settings.json");
 
+    /// <summary>キューが 1 つしか無かった頃のキュー。queues.json が無いときに取り込む (書き換えない)。</summary>
     public static string QueueFile => Path.Combine(DataDir, "queue.json");
+
+    /// <summary>名前を付けた複数のキュー。</summary>
+    public static string QueuesFile => Path.Combine(DataDir, "queues.json");
 
     /// <summary>チェック済みの曲 (キューとは別に保存するので、キューから消しても残る)。</summary>
     public static string CheckedFile => Path.Combine(DataDir, "checked.json");

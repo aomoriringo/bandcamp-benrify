@@ -154,17 +154,15 @@
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid>
                 <TextBox x:Name="UrlBox" Text="{Binding InputUrl, UpdateSourceTrigger=PropertyChanged}"
                          VerticalContentAlignment="Center" Padding="12,7" FontSize="14">
                     <TextBox.InputBindings>
                         <KeyBinding Key="Enter" Command="{Binding OpenInBrowseCommand}" />
-                        <KeyBinding Key="Enter" Modifiers="Ctrl" Command="{Binding AddUrlCommand}" />
                     </TextBox.InputBindings>
                 </TextBox>
-                <TextBlock Text="Bandcamp の URL (レーベル・アーティスト・アルバム・曲) — Enter で「探す」、Ctrl+Enter でそのままキューへ (キーワードならブラウザで検索)" Margin="15,0,0,0"
+                <TextBlock Text="Bandcamp の URL (レーベル・アーティスト・アルバム・曲) — Enter で「探す」に表示 (キーワードならブラウザで検索)" Margin="15,0,0,0"
                            VerticalAlignment="Center" Foreground="{StaticResource DimTextBrush}" IsHitTestVisible="False">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
@@ -180,9 +178,7 @@
             </Grid>
             <Button x:Name="BrowseButton" Grid.Column="1" Content="探す" Command="{Binding OpenInBrowseCommand}" Style="{StaticResource AccentPillButton}" Padding="20,6" Margin="10,0,0,0"
                     ToolTip="「探す」タブで作品一覧や検索結果を表示して、曲を選んでキューに入れます (Enter)" />
-            <Button Grid.Column="2" Content="キューに追加" Command="{Binding AddUrlCommand}" Style="{StaticResource PillButton}"
-                    ToolTip="URL の曲・アルバムの全曲・レーベルの全作品の全曲を、選ばずにそのままキューへ (Ctrl+Enter)" />
-            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="18,0,0,0">
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="18,0,0,0">
                 <TextBlock Text="{Binding CollectionStatus}" VerticalAlignment="Center" Foreground="{StaticResource MutedText}" FontSize="12" />
                 <Button x:Name="RefreshCollectionButton" Content="コレクション更新" Command="{Binding RefreshCollectionCommand}" Style="{StaticResource PillButton}" Margin="10,0,0,0"
                         ToolTip="Bandcamp の公開コレクションを読み込み直して、購入済みの印を更新します" />
@@ -380,8 +376,9 @@
                                     </DataGrid.RowStyle>
                                     <DataGrid.ContextMenu>
                                         <ContextMenu>
-                                            <MenuItem Header="選択した作品の全曲をキューに追加" Command="{Binding PlacementTarget.DataContext.AddReleasesCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                      CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="選択した作品の全曲をキューに追加" Tag="releases" SubmenuOpened="AddToQueueMenu_SubmenuOpened">
+                                                <MenuItem Header="…" />
+                                            </MenuItem>
                                             <MenuItem Header="アーティスト / レーベルを開く" Command="{Binding PlacementTarget.DataContext.OpenItemCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                       CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                             <MenuItem Header="Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
@@ -453,13 +450,25 @@
                                     <TextBlock Text="{Binding SelectedItem.Artist}" Foreground="{StaticResource SubTextBrush}" Margin="0,2,0,0" />
                                     <TextBlock Text="{Binding SelectedSummary}" Foreground="{StaticResource MutedText}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
                                     <WrapPanel Margin="0,10,0,0">
-                                        <Button x:Name="AddReleaseButton" Content="この作品の全曲をキューに追加" Command="{Binding AddCurrentReleaseCommand}" Style="{StaticResource PillButton}" Margin="0,0,6,0" />
+                                        <Button x:Name="AddReleaseButton" Style="{StaticResource PillButton}" Margin="0,0,6,0" AutomationProperties.Name="この作品の全曲をキューに追加"
+                                                ToolTip="押すと、入れるキューを選べます (新しいキューを作って入れることもできます)">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="この作品の全曲をキューに追加" />
+                                                <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE70D;" FontSize="10" VerticalAlignment="Center" Margin="8,1,0,0" />
+                                            </StackPanel>
+                                        </Button>
                                         <Button Content="Bandcamp で開く" Command="{Binding OpenInBrowserCommand}" Style="{StaticResource PillButton}" Margin="0" />
                                     </WrapPanel>
                                 </StackPanel>
                             </Grid>
                             <WrapPanel DockPanel.Dock="Top" Margin="4,0,0,6" Visibility="{Binding HasSelectedRelease, Converter={StaticResource BoolToVis}}">
-                                <Button x:Name="AddTracksButton" Content="選択した曲をキューに追加" Command="{Binding AddTracksCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" Style="{StaticResource PillButton}" Margin="0,0,6,0" />
+                                <Button x:Name="AddTracksButton" Style="{StaticResource PillButton}" Margin="0,0,6,0" AutomationProperties.Name="選択した曲をキューに追加"
+                                        ToolTip="押すと、入れるキューを選べます (新しいキューを作って入れることもできます)">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="選択した曲をキューに追加" />
+                                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE70D;" FontSize="10" VerticalAlignment="Center" Margin="8,1,0,0" />
+                                    </StackPanel>
+                                </Button>
                                 <Button x:Name="FetchTrackInfoButton" Content="曲の情報を取得" Command="{Binding FetchTrackInfoCommand}" CommandParameter="{Binding SelectedItems, ElementName=TrackGrid}" Style="{StaticResource PillButton}" Margin="0"
                                         ToolTip="曲ページを取得して、曲単体のサポーター数と値段を表示します (1 曲 1 リクエスト)。選択があれば選択した曲だけ。" />
                                 <TextBlock Text="ダブルクリックで試聴 (キューには入りません)" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{StaticResource MutedText}" FontSize="12" />
@@ -483,8 +492,9 @@
                                     <ContextMenu>
                                         <MenuItem Header="試聴" Command="{Binding PlacementTarget.DataContext.PreviewCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
-                                        <MenuItem Header="キューに追加" Command="{Binding PlacementTarget.DataContext.AddTracksCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                                  CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        <MenuItem Header="キューに追加" Tag="tracks" SubmenuOpened="AddToQueueMenu_SubmenuOpened">
+                                            <MenuItem Header="…" />
+                                        </MenuItem>
                                         <MenuItem Header="曲の情報を取得" Command="{Binding PlacementTarget.DataContext.FetchTrackInfoCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                                         <MenuItem Header="チェック済みにする" Command="{Binding PlacementTarget.DataContext.CheckSelectedCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
@@ -518,8 +528,84 @@
             </TabItem>
 
             <!-- キュー -->
-            <TabItem Header="{Binding QueueHeader}">
+            <TabItem Header="キュー">
             <DockPanel Margin="0,10,0,0">
+                <!-- キューの切り替え (名前の変更・削除は右クリック / ダブルクリック) -->
+                <Grid x:Name="QueueBar" DockPanel.Dock="Top" Margin="0,0,0,4" SizeChanged="QueueBar_SizeChanged">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="NewQueueButton" Grid.Column="1" Command="{Binding NewQueueCommand}" Style="{StaticResource PillButton}"
+                            HorizontalAlignment="Left" VerticalAlignment="Bottom" Padding="12,5" Margin="0,0,0,6"
+                            AutomationProperties.Name="新しいキュー" ToolTip="名前を付けた新しいキューを作ります">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE710;" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" />
+                            <TextBlock Text="新しいキュー" />
+                        </StackPanel>
+                    </Button>
+                    <ListBox x:Name="QueueTabs" ItemsSource="{Binding Queues}" SelectedItem="{Binding SelectedQueue, Mode=TwoWay}"
+                             Background="Transparent" BorderThickness="0" Padding="0"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                             AutomationProperties.Name="キューの一覧" KeyboardNavigation.DirectionalNavigation="Cycle">
+                        <ListBox.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Cursor" Value="Hand" />
+                                <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+                                <Setter Property="AutomationProperties.Name" Value="{Binding Name}" />
+                                <Setter Property="Tag" Value="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}" />
+                                <Setter Property="ToolTip" Value="ダブルクリックで名前を変更 / 右クリックで名前の変更・削除" />
+                                <EventSetter Event="MouseDoubleClick" Handler="QueueTab_MouseDoubleClick" />
+                                <EventSetter Event="PreviewMouseRightButtonDown" Handler="QueueTab_PreviewMouseRightButtonDown" />
+                                <Setter Property="ContextMenu">
+                                    <Setter.Value>
+                                        <ContextMenu>
+                                            <MenuItem Header="名前を変更" Command="{Binding PlacementTarget.Tag.RenameQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="このキューを削除" Command="{Binding PlacementTarget.Tag.DeleteQueueCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        </ContextMenu>
+                                    </Setter.Value>
+                                </Setter>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="ListBoxItem">
+                                            <Border x:Name="Chip" Background="Transparent" BorderBrush="{StaticResource LineStrongBrush}" BorderThickness="1"
+                                                    CornerRadius="14" Padding="12,5" Margin="0,0,8,6">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock x:Name="NameText" Text="{Binding Name}" Foreground="{StaticResource SubTextBrush}"
+                                                               MaxWidth="260" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                                    <TextBlock x:Name="CountText" Text="{Binding Count}" Foreground="{StaticResource DimTextBrush}"
+                                                               Margin="8,0,0,0" VerticalAlignment="Center" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="Chip" Property="BorderBrush" Value="#454C55" />
+                                                    <Setter TargetName="NameText" Property="Foreground" Value="{StaticResource TextBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsKeyboardFocused" Value="True">
+                                                    <Setter TargetName="Chip" Property="BorderBrush" Value="{StaticResource TextBrush}" />
+                                                </Trigger>
+                                                <Trigger Property="IsSelected" Value="True">
+                                                    <Setter TargetName="Chip" Property="Background" Value="{DynamicResource AccentSoftBrush}" />
+                                                    <Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                                                    <Setter TargetName="NameText" Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                                    <Setter TargetName="CountText" Property="Foreground" Value="{DynamicResource AccentBrush}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </Grid>
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8" LastChildFill="False">
                     <Button x:Name="FetchDetailsButton" Content="{Binding DetailsButtonText}" Margin="0" Style="{StaticResource PillButton}"
                             Command="{Binding FetchDetailsCommand}"
@@ -553,6 +639,13 @@
                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
                         <MenuItem Header="選択した曲の情報を取得 (サポーター数・値段)" Command="{Binding PlacementTarget.DataContext.FetchDetailsCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItems, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                        <Separator />
+                        <MenuItem Header="他のキューに追加" Tag="copy" SubmenuOpened="AddToQueueMenu_SubmenuOpened">
+                            <MenuItem Header="…" />
+                        </MenuItem>
+                        <MenuItem Header="他のキューに移動" Tag="move" SubmenuOpened="AddToQueueMenu_SubmenuOpened">
+                            <MenuItem Header="…" />
+                        </MenuItem>
                         <Separator />
                         <MenuItem Header="曲を Bandcamp で開く" Command="{Binding PlacementTarget.DataContext.OpenInBrowserCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                                   CommandParameter="{Binding PlacementTarget.SelectedItem, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
@@ -628,7 +721,7 @@
                 <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE90B;" FontSize="32" HorizontalAlignment="Center" Foreground="{StaticResource DimTextBrush}" />
                 <TextBlock Text="キューは空です" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Foreground="{StaticResource SubTextBrush}" Margin="0,12,0,0" />
                 <TextBlock Margin="0,10,0,0" Foreground="{StaticResource MutedText}" TextAlignment="Center" LineHeight="24">
-                    「探す」タブで作品や曲を選んで追加するか、URL を貼って「キューに追加」<LineBreak />
+                    「探す」タブで作品や曲を選んで「キューに追加」<LineBreak />
                     列の見出しをクリックするとサポーター数や値段で並び替えられます。<LineBreak />
                     ランダム再生をオフにすると、並べた順に上から再生します。
                 </TextBlock>

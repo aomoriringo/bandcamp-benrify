@@ -215,3 +215,30 @@ public static class Format
     public static string Eta(TimeSpan t) =>
         t.TotalMinutes >= 1 ? $"{Math.Ceiling(t.TotalMinutes)} 分" : $"{Math.Ceiling(t.TotalSeconds)} 秒";
 }
+
+/// <summary>キューの切り替え欄の 1 つ (名前と曲数)。</summary>
+public sealed class QueueListItemViewModel(SavedQueue saved) : ObservableObject
+{
+    private int _count = saved.Tracks.Count;
+
+    public SavedQueue Saved { get; } = saved;
+
+    public string Name
+    {
+        get => Saved.Name;
+        set
+        {
+            if (Saved.Name != value)
+            {
+                Saved.Name = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public int Count
+    {
+        get => _count;
+        set => Set(ref _count, value);
+    }
+}

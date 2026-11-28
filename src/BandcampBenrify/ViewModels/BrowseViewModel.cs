@@ -215,9 +215,9 @@ public sealed class BrowseViewModel : ObservableObject
         LoadMoreFanCommand = new AsyncCommand(LoadMoreFanAsync, () => _fanList is { HasMore: true } && !_loadingFan);
         FetchReleaseInfoCommand = new AsyncCommand(FetchReleaseInfoAsync, () => (PendingReleaseCount > 0 || PendingPlusCount > 0) && !_fetchingReleases && !_host.IsFetchingDetails);
         OpenItemCommand = new AsyncCommand(p => p is BrowseItemViewModel { Kind: SearchKind.Band } b ? OpenAsync(b.Url) : Task.CompletedTask);
-        AddReleasesCommand = new AsyncCommand(p => AddReleasesAsync(SelectedReleases(p)), p => SelectedReleases(p).Count > 0);
-        AddCurrentReleaseCommand = new AsyncCommand(() => AddReleasesAsync(SelectedItem is { IsRelease: true } s ? [s] : []), () => SelectedItem is { IsRelease: true, Page: not null });
-        AddTracksCommand = new RelayCommand(p => AddTracks(SelectedTracks(p)), p => SelectedTracks(p).Count > 0);
+        AddReleasesCommand = new AsyncCommand(p => AddReleasesAsync(SelectedReleases(p), _host.QueueTarget), p => SelectedReleases(p).Count > 0);
+        AddCurrentReleaseCommand = new AsyncCommand(() => AddReleasesAsync(SelectedItem is { IsRelease: true } s ? [s] : [], _host.QueueTarget), () => SelectedItem is { IsRelease: true, Page: not null });
+        AddTracksCommand = new RelayCommand(p => AddTracksTo(SelectedTracks(p), _host.QueueTarget), p => SelectedTracks(p).Count > 0);
         PreviewCommand = new AsyncCommand(p => p is QueueItemViewModel { IsStreamable: true } t ? _host.PreviewAsync(t) : Task.CompletedTask);
         FetchTrackInfoCommand = new AsyncCommand(
             p => _host.FetchDetailsAsync(SelectedTracks(p) is { Count: > 0 } sel ? sel : Tracks.ToList()),
@@ -828,25 +828,22 @@ public sealed class BrowseViewModel : ObservableObject
 
     // ---- キューへ ----
 
-    private void AddTracks(IReadOnlyList<QueueItemViewModel> tracks)
+    /// <summary>選んだ曲を指定したキューに入れる (右クリックの「キューに追加」からはどのキューにも入れられる)。</summary>
+    public void AddTracksTo(IReadOnlyList<QueueItemViewModel> tracks, SavedQueue target)
     {
         var playable = tracks.Where(t => t.IsStreamable).Select(t => t.Track).ToList();
-        var added = _host.AddTracks(playable);
-        _host.SaveQueue();
-        _host.StatusText = $"{added} 曲をキューに追加しました"
-                           + (playable.Count > added ? $" ({playable.Count - added} 曲は追加済み)" : "")
-                           + (tracks.Count > playable.Count ? $" ({tracks.Count - playable.Count} 曲は試聴不可のため除外)" : "");
+        _host.AddTracksTo(playable, target, tracks.Count > playable.Count ? $" ({tracks.Count - playable.Count} 曲は試聴不可のため除外)" : null);
     }
 
     /// <summary>
     /// 選んだ作品の全曲をキューに追加する。取得済みの作品はすぐに、未取得の作品はページが届いたものから順に追加する
     /// (1 作品 1 リクエストで間隔を空けるので、件数が多いと時間がかかる。進み具合はジョブ欄に出す)。
     /// </summary>
-    private async Task AddReleasesAsync(IReadOnlyList<BrowseItemViewModel> releases)
+    public async Task AddReleasesAsync(IReadOnlyList<BrowseItemViewModel> releases, SavedQueue target)
     {
         var ordered = releases.OrderBy(r => r.Page is null ? 1 : 0).ToList();
         var toFetch = ordered.Count(r => r.Page is null);
-        var ct = _host.BeginJob($"{releases.Count} 作品をキューに追加中…");
+        var ct = _host.BeginJob($"{releases.Count} 作品を{_host.QueueLabelOf(target)}に追加中…");
         var added = 0;
         var found = 0;
         var fetched = 0;
@@ -860,7 +857,7 @@ public sealed class BrowseViewModel : ObservableObject
                 {
                     var eta = TimeSpan.FromTicks(_client.EstimatedTimePerRequest.Ticks * (toFetch - fetched));
                     _host.ReportJob(
-                        $"選んだ作品をキューに追加中: ページを取得 {fetched}/{toFetch} (残り約 {Format.Eta(eta)}) — {added} 曲追加済み: {r.Title}",
+                        $"選んだ作品を{_host.QueueLabelOf(target)}に追加中: ページを取得 {fetched}/{toFetch} (残り約 {Format.Eta(eta)}) — {added} 曲追加済み: {r.Title}",
                         toFetch > 0 ? (double)fetched / toFetch : -1);
                     try
                     {
@@ -881,10 +878,10 @@ public sealed class BrowseViewModel : ObservableObject
 
                 var tracks = r.Page!.Tracks.Where(t => t.StreamUrl is not null).ToList();
                 found += tracks.Count;
-                added += _host.AddTracks(tracks);
+                added += _host.AddTracks(tracks, target);
             }
 
-            _host.StatusText = $"{releases.Count} 作品から {added} 曲をキューに追加しました"
+            _host.StatusText = $"{releases.Count} 作品から {added} 曲を{_host.QueueLabelOf(target)}に追加しました"
                                + (found > added ? $" ({found - added} 曲は追加済み)" : "")
                                + (errors > 0 ? $" (取得に失敗した作品: {errors})" : "");
         }
